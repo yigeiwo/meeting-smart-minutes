@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL 16 Enterprise Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: feishu-meeting-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: feishu_meeting
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. Feishu Meeting AI Core Service
+  app:
+    build: .
+    container_name: feishu-meeting-app
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      - PG_ENABLED=true
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DATABASE=feishu_meeting
+      - PG_USER=postgres
+      - PG_PASSWORD=postgrespassword
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8000
+      - BRIDGE_HOST=0.0.0.0
+      - BRIDGE_PORT=5566
+    ports:
+      - "8000:8000"
+      - "5566:5566"
+    volumes:
+      - ./records:/app/records
+
+volumes:
+  pgdata:

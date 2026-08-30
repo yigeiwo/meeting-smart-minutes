@@ -1,0 +1,113 @@
+[
+  {
+    "id": "5c40795e",
+    "title": "飞书会议妙记与 AI Passport 全链路联调总结会",
+    "date": "2026-08-29 23:40",
+    "duration": "25分钟",
+    "created_at": "2026-08-29 23:40:40",
+    "doc_url": "https://feishu.cn/docx/local_preview_1788018040",
+    "scenario": "general",
+    "source": "web",
+    "summary_overview": "会议围绕飞书妙记自动总结系统、飞书群机器人互动卡片推送及 AI Passport 硬件胸卡适配展开研讨，确认了关键接口与本周五发版目标。",
+    "decisions": [
+      "确定采用飞书群互动卡片 + 飞书云文档作为纪要沉淀双通道",
+      "确认 AI Passport 录音卡片协议格式（单行 NDJSON，波特率 115200 / Socket 5566）",
+      "本周五完成全链路联调并进行首批内测"
+    ],
+    "todos": [
+      {
+        "task": "配置飞书开放平台自建应用权限并发布版本",
+        "owner": "研发张工",
+        "due": "明日 18:00 前",
+        "priority": "P0"
+      },
+      {
+        "task": "输出 AI 会议总结标准使用手册与演示视频",
+        "owner": "运营小赵",
+        "due": "本周四",
+        "priority": "P1"
+      },
+      {
+        "task": "组织核心业务团队进行会议纪要自动流转试点",
+        "owner": "产品王经理",
+        "due": "本周五",
+        "priority": "P1"
+      }
+    ],
+    "topics": [
+      {
+        "name": "飞书开放平台集成与权限对接",
+        "speaker": "研发张工",
+        "summary": "已打通 Tenant Token 自动刷新与 Minutes/Docx API，支持群机器人一键推送交互卡片。"
+      },
+      {
+        "name": "大模型提示词与场景定制",
+        "speaker": "产品王经理",
+        "summary": "针对技术、PRD、商务等 5 大场景分别预置专业级 Prompt，大幅提升 Todo 提取准确率。"
+      },
+      {
+        "name": "硬件卡片与模拟器联调",
+        "speaker": "李总",
+        "summary": "支持 PC 端 QEMU 模拟器与 ESP32-C3 物理卡片无缝直连，一键展示会议决策与待办。"
+      }
+    ],
+    "follow_ups": [
+      "针对超长会议（>2小时）的分片总结与上下文合并算法待做压力测试",
+      "飞书多维表格字段模板可根据不同业务线进一步定制"
+    ],
+    "raw_data": {
+      "title": "飞书会议妙记与 AI Passport 全链路联调总结会",
+      "date": "2026-08-29 23:40",
+      "duration": "25分钟",
+      "participants": "李总, 研发张工, 产品王经理, 运营小赵",
+      "summary_overview": "会议围绕飞书妙记自动总结系统、飞书群机器人互动卡片推送及 AI Passport 硬件胸卡适配展开研讨，确认了关键接口与本周五发版目标。",
+      "decisions": [
+        "确定采用飞书群互动卡片 + 飞书云文档作为纪要沉淀双通道",
+        "确认 AI Passport 录音卡片协议格式（单行 NDJSON，波特率 115200 / Socket 5566）",
+        "本周五完成全链路联调并进行首批内测"
+      ],
+      "topics": [
+        {
+          "name": "飞书开放平台集成与权限对接",
+          "speaker": "研发张工",
+          "summary": "已打通 Tenant Token 自动刷新与 Minutes/Docx API，支持群机器人一键推送交互卡片。"
+        },
+        {
+          "name": "大模型提示词与场景定制",
+          "speaker": "产品王经理",
+          "summary": "针对技术、PRD、商务等 5 大场景分别预置专业级 Prompt，大幅提升 Todo 提取准确率。"
+        },
+        {
+          "name": "硬件卡片与模拟器联调",
+          "speaker": "李总",
+          "summary": "支持 PC 端 QEMU 模拟器与 ESP32-C3 物理卡片无缝直连，一键展示会议决策与待办。"
+        }
+      ],
+      "todos": [
+        {
+          "task": "配置飞书开放平台自建应用权限并发布版本",
+          "owner": "研发张工",
+          "due": "明日 18:00 前",
+          "priority": "P0"
+        },
+        {
+          "task": "输出 AI 会议总结标准使用手册与演示视频",
+          "owner": "运营小赵",
+          "due": "本周四",
+          "priority": "P1"
+        },
+        {
+          "task": "组织核心业务团队进行会议纪要自动流转试点",
+          "owner": "产品王经理",
+          "due": "本周五",
+          "priority": "P1"
+        }
+      ],
+      "follow_ups": [
+        "针对超长会议（>2小时）的分片总结与上下文合并算法待做压力测试",
+        "飞书多维表格字段模板可根据不同业务线进一步定制"
+      ],
+      "doc_url": "https://feishu.cn/docx/local_preview_1788018040"
+    }
+  }
+]

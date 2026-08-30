@@ -1,0 +1,8 @@
+{
+  "feishu_bot": {
+    "auto_reply": "true"
+  },
+  "test_b": {
+    "test_k": "test_v"
+  }
+}

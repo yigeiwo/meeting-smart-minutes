@@ -1,0 +1,3406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>会议智能妙记 | AI Passport</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --lark-blue: #3370ff;
+      --bg-dark: #0f172a;
+      --border-color: #e2e8f0;
+    }
+    body { background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #334155; }
+    .navbar-custom { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-bottom: 1px solid #334155; }
+    .nav-tabs .nav-link { font-weight: 500; color: #64748b; border: none; padding: 12px 20px; }
+    .nav-tabs .nav-link.active { color: var(--lark-blue); border-bottom: 3px solid var(--lark-blue); background: transparent; }
+    .card-modern { border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); background: #fff; }
+    .badge-decision { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+    .badge-todo { background-color: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+    .card-screen-sim { width: 240px; height: 320px; background: #000; border: 6px solid #334155; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3); color: #fff; padding: 12px; font-family: monospace; position: relative; overflow: hidden; }
+    .status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .status-online { background-color: #10b981; }
+    .btn-lark { background-color: var(--lark-blue); color: #fff; font-weight: 500; }
+    .btn-lark:hover { background-color: #245bdb; color: #fff; }
+    .doc-banner { background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%); border: 1px solid #bfdbfe; border-radius: 8px; }
+    .ai-preset-btn { font-size: 13px; border-radius: 20px; padding: 4px 12px; cursor: pointer; transition: all 0.2s; }
+    .ai-preset-btn.active { background-color: var(--lark-blue); color: #fff; border-color: var(--lark-blue); font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark navbar-custom px-4 py-3">
+  <div class="container-fluid">
+    <div class="d-flex align-items-center">
+      <i class="bi bi-file-earmark-easel-fill text-primary fs-3 me-2"></i>
+      <span class="fs-4 fw-bold text-white">会议智能妙记</span>
+      <span class="badge bg-primary ms-2">FoloToy AI Passport</span>
+    </div>
+    <div class="d-flex align-items-center text-light">
+      <span class="me-3 small"><span class="status-indicator status-online me-1"></span> 飞书网关: 就绪</span>
+      <span class="me-3 small"><span class="status-indicator status-online me-1"></span> AI 引擎: <strong id="top-current-model" class="text-warning">DeepSeek</strong></span>
+      <span class="me-3 small"><span class="status-indicator status-online me-1"></span> 端口: <span id="top-web-port">8000</span> / 5566</span>
+      
+      <!-- 用户状态与退出登录 -->
+      <div class="dropdown" id="user-dropdown-container">
+        <button class="btn btn-sm btn-outline-light dropdown-toggle d-flex align-items-center" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-person-circle fs-6 me-2 text-info"></i>
+          <span id="top-user-name" class="fw-semibold">加载中...</span>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm" style="font-size: 13px; min-width: 220px;">
+          <li class="px-3 py-2 border-bottom bg-light">
+            <div class="fw-bold text-dark" id="user-dropdown-fullname">系统管理员</div>
+            <div class="text-muted small" id="user-dropdown-email">admin@feishu.company</div>
+            <span class="badge bg-primary text-white mt-1" id="user-role-label">👑 系统管理员</span>
+          </li>
+          <li><a class="dropdown-item py-2" href="/register"><i class="bi bi-person-plus me-2 text-primary"></i>注册新账号</a></li>
+          <li><a class="dropdown-item py-2" href="/login"><i class="bi bi-arrow-repeat me-2 text-secondary"></i>切换登录账号</a></li>
+          <li><hr class="dropdown-divider my-1"></li>
+          <li><a class="dropdown-item py-2 text-danger" href="javascript:void(0)" onclick="handleLogout()"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4">
+  <ul class="nav nav-tabs mb-4" id="mainTab" role="tablist">
+    <li class="nav-item">
+      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-audio"><i class="bi bi-cpu-fill me-1 text-primary"></i> 智能会议与 AI Passport 硬件视窗</button>
+    </li>
+    
+    <li class="nav-item">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-history" onclick="loadHistoryRecords()"><i class="bi bi-journal-bookmark-fill me-1"></i> 文档归档与历史记录</button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-bots" onclick="loadBotChannels()"><i class="bi bi-robot me-1"></i> 🤖 多机器人推送中心</button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-settings"><i class="bi bi-gear me-1"></i> 多 AI 模型与系统配置</button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link text-primary fw-semibold" data-bs-toggle="tab" data-bs-target="#tab-docs"><i class="bi bi-book-half me-1"></i> 📖 配置说明手册</button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="mainTabContent">
+    <!-- TAB 1: 音频与文本分析 -->
+    <div class="tab-pane fade show active" id="tab-audio" role="tabpanel">
+
+      <!-- 🎴 首页核心视窗: AI Passport 智能胸卡硬件实时屏幕孪生与控制台 -->
+      <div class="card card-modern p-4 mb-4 border-primary border-opacity-25" style="background: linear-gradient(135deg, #ffffff 0%, #f8faff 100%);">
+        <div class="row align-items-center g-4">
+          <!-- 左侧: 拟真 AI Passport 硬件屏幕视窗 -->
+          <div class="col-lg-4 col-md-5 d-flex justify-content-center">
+            <div class="card-simulator shadow-lg" style="width: 250px; height: 320px; background: #18191c; border-radius: 24px; border: 4px solid #3b3e45; position: relative; padding: 14px; color: #fff; box-shadow: 0 16px 36px rgba(0,0,0,0.25);">
+              
+              <!-- 挂绳孔与顶部边框 -->
+              <div class="position-absolute top-0 start-50 translate-middle-x mt-1" style="width: 36px; height: 4px; background: #4b4f58; border-radius: 2px;"></div>
+              
+              <!-- OLED/LCD 屏幕外壳 -->
+              <div style="background: #000; border-radius: 12px; height: 100%; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid #2d3039; font-family: monospace;">
+                
+                <!-- 屏幕顶部状态栏 -->
+                <div class="d-flex justify-content-between align-items-center pb-1 border-bottom border-secondary text-info" style="font-size: 10px;">
+                  <span><i class="bi bi-wifi me-1"></i>PASSPORT</span>
+                  <span id="twin-screen-time">10:08</span>
+                  <span id="twin-screen-battery"><i class="bi bi-battery me-1 text-secondary"></i>--</span>
+                </div>
+
+                <!-- 屏幕主体内容 (100% 真实数据驱动: 未连接/已连接/录音/总结) -->
+                <div class="text-center py-2 flex-grow-1 d-flex flex-column justify-content-center" id="twin-screen-body">
+                  <div class="badge bg-secondary mb-2" id="twin-screen-badge">【 🔴 未连接 】</div>
+                  <div class="small fw-bold text-white mb-2 text-truncate" id="twin-screen-title">等待胸卡接入</div>
+                  
+                  <!-- 动态状态区 (根据真实硬件数据呈现) -->
+                  <div id="twin-screen-dynamic-area" class="text-start small text-light" style="font-size: 11px; line-height: 1.4;">
+                    <p class="mb-1 text-danger" id="twin-line-1">● 状态: 暂无硬件连接</p>
+                    <p class="mb-1 text-muted" id="twin-line-2">● 端口: TCP 0.0.0.0:5566</p>
+                    <p class="mb-0 text-muted" id="twin-line-3">● 请接入 ESP32-C3 实体胸卡</p>
+                  </div>
+                </div>
+
+                <!-- 屏幕底部操作提示与文档标记 -->
+                <div class="pt-1 border-top border-secondary text-center text-muted d-flex justify-content-between align-items-center" style="font-size: 9px;">
+                  <span id="twin-screen-conn-status" class="text-danger">● 未连接</span>
+                  <span id="twin-screen-doc-status" class="text-secondary">飞书知识联动</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧: 硬件通信状态、实体操作与数据链路 -->
+          <div class="col-lg-8 col-md-7">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <div>
+                <h5 class="fw-bold mb-1 text-dark">
+                  <i class="bi bi-cpu-fill text-primary me-2"></i>AI Passport 智能胸卡硬件视窗 (FoloToy 联动)
+                  <span class="badge bg-secondary ms-2" id="twin-hw-status-badge"><i class="bi bi-circle me-1"></i>未连接 (端口 5566)</span>
+                </h5>
+                <p class="text-muted small mb-0">
+                  支持 <strong>ESP32-C3 真实硬件胸卡</strong> 与 <strong>QEMU 模拟器</strong>，通过 TCP Socket 双向同步屏幕帧与录音状态。
+                </p>
+              </div>
+            </div>
+
+            <!-- 真实硬件交互控制指令 -->
+            <div class="d-flex flex-wrap gap-2 my-3">
+              <button class="btn btn-outline-success btn-sm" type="button" onclick="triggerHardwareEvent('record_start')">
+                <i class="bi bi-record-circle-fill text-danger me-1"></i>开始胸卡录音
+              </button>
+              <button class="btn btn-outline-danger btn-sm" type="button" onclick="triggerHardwareEvent('record_stop')">
+                <i class="bi bi-stop-circle-fill me-1"></i>结束录音并生成纪要
+              </button>
+              <button class="btn btn-outline-primary btn-sm" type="button" onclick="triggerHardwareEvent('key_prev')">
+                <i class="bi bi-arrow-up-circle me-1"></i>切换上一条 Todo
+              </button>
+              <button class="btn btn-outline-primary btn-sm" type="button" onclick="triggerHardwareEvent('key_next')">
+                <i class="bi bi-arrow-down-circle me-1"></i>切换下一条 Todo
+              </button>
+              <button class="btn btn-primary btn-sm" type="button" onclick="pushToHardwareCard()">
+                <i class="bi bi-send-fill me-1"></i>推送当前纪要到卡片屏幕
+              </button>
+            </div>
+
+            <!-- 实时通信日志与状态流 -->
+            <div class="bg-dark text-light p-2 rounded small" style="font-family: monospace; font-size: 11px;">
+              <div class="d-flex justify-content-between text-secondary border-bottom border-secondary pb-1 mb-1">
+                <span>NDJSON 硬件通信流 (TCP Socket)</span>
+                <span id="twin-hw-client-count">在线设备: 0 台</span>
+              </div>
+              <pre class="mb-0 text-success" id="twin-bridge-logs" style="max-height: 85px; overflow-y: auto;">[系统] 硬件通信桥接已就绪 (tcp://0.0.0.0:5566)</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-4">
+        <div class="col-lg-5">
+          <div class="card card-modern p-4 h-100">
+            <h5 class="fw-bold mb-3"><i class="bi bi-soundwave text-primary me-2"></i>会议内容输入</h5>
+            
+            <div class="mb-3">
+              <label class="form-label fw-semibold">总结场景模板</label>
+              <select class="form-select" id="scenario-select">
+                <option value="general" selected>📊 通用高效会议 (背景、决议、待办、跟进)</option>
+                <option value="tech">💻 研发架构与敏捷评审 (技术选型、架构改动、责任人)</option>
+                <option value="prd">🎯 产品需求评审 PRD (需求定案、争议裁决、P0/P1排期)</option>
+                <option value="business">💼 商务合作与客户谈判 (客户诉求、合同条款、卡点跟进)</option>
+                <option value="brainstorm">💡 头脑风暴与战略研讨 (创意矩阵、可行性评估、MVP路线)</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-semibold">上传会议录音 (WAV / MP3 / M4A)</label>
+              <input class="form-control" type="file" id="audio-file-input" accept=".wav,.mp3,.m4a,.aac,.flac">
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-semibold">或粘贴会议语音逐字稿 / 讨论文本</label>
+              <textarea class="form-control" id="transcript-input" rows="7" placeholder="在此粘贴会议发言内容或速记文本..."></textarea>
+            </div>
+
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="auto-broadcast-bot-chk" checked>
+              <label class="form-check-label fw-semibold text-success" for="auto-broadcast-bot-chk">
+                <i class="bi bi-broadcast me-1"></i> 总结后自动向已开启的机器人渠道推送纪要消息 (默认推荐)
+              </label>
+            </div>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="auto-create-doc-chk">
+              <label class="form-check-label fw-semibold text-primary" for="auto-create-doc-chk">
+                <i class="bi bi-file-earmark-word-fill me-1"></i> 总结后同时创建飞书云文档 (Docx，可选)
+              </label>
+            </div>
+
+            <div class="d-grid gap-2">
+              <button class="btn btn-lark btn-lg py-3" id="btn-summarize" onclick="startSummarize()">
+                <i class="bi bi-lightning-charge-fill me-2"></i>⚡ AI 智能总结并多渠道推送消息
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 总结展示看板 -->
+        <div class="col-lg-7">
+          <div class="card card-modern p-4 h-100" id="result-container">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold mb-0"><i class="bi bi-file-earmark-check text-success me-2"></i>智能纪要工作台</h5>
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-primary" onclick="broadcastToAllBots()"><i class="bi bi-broadcast me-1"></i>多机器人互推广播</button>
+                <button class="btn btn-outline-success" onclick="createFeishuDoc()"><i class="bi bi-file-earmark-plus me-1"></i>生成飞书云文档</button>
+                <button class="btn btn-outline-dark" onclick="copyMarkdown()"><i class="bi bi-clipboard me-1"></i>复制 Markdown</button>
+                <button class="btn btn-outline-secondary" onclick="pushToHardwareCard()"><i class="bi bi-credit-card-2-front me-1"></i>推送到胸卡</button>
+              </div>
+            </div>
+
+            <!-- 飞书文档直达 Banner -->
+            <div id="doc-success-banner" class="doc-banner p-3 mb-3 d-none">
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <span class="badge bg-success me-2">✔ 飞书文档已就绪</span>
+                  <span class="fw-bold text-dark" id="banner-doc-title">会议纪要</span>
+                </div>
+                <div>
+                  <a href="#" target="_blank" class="btn btn-sm btn-primary" id="banner-doc-link">
+                    <i class="bi bi-box-arrow-up-right me-1"></i> 立即打开飞书文档
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div id="loading-spinner" class="text-center py-5 d-none">
+              <div class="spinner-border text-primary" role="status"></div>
+              <p class="mt-3 text-muted" id="loading-text">AI 正在深度提炼会议决策并构建飞书文档...</p>
+            </div>
+
+            <div id="summary-empty-state" class="text-center py-5 text-muted">
+              <i class="bi bi-journal-text display-4 text-secondary mb-3"></i>
+              <p>暂无纪要数据。请在左侧上传音频或粘贴文本后，点击“AI 分析并直接生成飞书文档”。</p>
+            </div>
+
+            <div id="summary-content" class="d-none">
+              <div class="alert alert-primary py-2 px-3 mb-3">
+                <div class="d-flex justify-content-between">
+                  <span class="fw-bold" id="res-title">会议纪要</span>
+                  <span class="small text-muted" id="res-meta">2026-08-29 | 时长: 25分钟</span>
+                </div>
+                <div class="small mt-1 text-secondary" id="res-overview"></div>
+              </div>
+
+              <!-- 核心决策 -->
+              <div class="mb-3">
+                <h6 class="fw-bold text-success"><i class="bi bi-check-circle-fill me-1"></i> 🎯 核心决议与决策定案</h6>
+                <ul class="list-group list-group-flush" id="res-decisions"></ul>
+              </div>
+
+              <!-- 待办清单 -->
+              <div class="mb-3">
+                <h6 class="fw-bold text-primary"><i class="bi bi-lightning-charge-fill me-1"></i> ⚡ 行动清单 (Action Items & Todo)</h6>
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle">
+                    <thead class="table-light">
+                      <tr>
+                        <th>责任人</th>
+                        <th>行动任务</th>
+                        <th>截止时间</th>
+                        <th>优先级</th>
+                      </tr>
+                    </thead>
+                    <tbody id="res-todos"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- 议题详情 -->
+              <div class="mb-3">
+                <h6 class="fw-bold text-secondary"><i class="bi bi-list-task me-1"></i> 📝 议题详述</h6>
+                <div class="accordion accordion-flush" id="res-topics"></div>
+              </div>
+
+              <!-- 遗留问题 -->
+              <div class="mb-2">
+                <h6 class="fw-bold text-danger"><i class="bi bi-question-circle-fill me-1"></i> ❓ 遗留与待跟进事项</h6>
+                <ul class="list-unstyled mb-0" id="res-followups"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: 硬件卡片与模拟器 -->
+    <div class="tab-pane fade" id="tab-hardware" role="tabpanel">
+      <div class="row g-4">
+        <div class="col-md-5 d-flex justify-content-center">
+          <div class="card-screen-sim">
+            <div class="d-flex justify-content-between border-bottom pb-1 mb-2 small text-warning">
+              <span>AI PASSPORT</span>
+              <span id="sim-time">10:08</span>
+              <span>电量 85%</span>
+            </div>
+            <div class="text-center py-2" id="sim-screen-body">
+              <div class="badge bg-primary mb-2" id="sim-badge">【 IDLE 待命 】</div>
+              <div class="small fw-bold text-info" id="sim-title">飞书会议智能胸卡</div>
+              <div class="mt-3 text-start small" style="font-size: 11px; line-height: 1.4;">
+                <p id="sim-line1">● OK 单击: 开始录音</p>
+                <p id="sim-line2">● OK 再次: 结束并总结</p>
+                <p id="sim-line3">● UP/DOWN: 查看 Todo</p>
+              </div>
+            </div>
+            <div class="position-absolute bottom-0 start-0 end-0 p-2 text-center border-top text-muted" style="font-size: 10px;">
+              PORT: 5566 · NDJSON PROTOCOL
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-7">
+          <div class="card card-modern p-4">
+            <h5 class="fw-bold mb-3"><i class="bi bi-sliders text-primary me-2"></i>硬件卡片交互与控制</h5>
+            <p class="text-muted">通过与 <strong>ai-passport-simulator (QEMU)</strong> 或真实 <strong>ESP32-C3 实体卡片</strong> 建立 TCP Socket 连接（默认端口 5566），实现双向同步控制。</p>
+
+            <div class="d-flex gap-2 mb-3">
+              <button class="btn btn-outline-success" onclick="simCardEvent('record_start')"><i class="bi bi-record-circle me-1"></i>模拟开始录音</button>
+              <button class="btn btn-outline-danger" onclick="simCardEvent('record_stop')"><i class="bi bi-stop-circle me-1"></i>模拟结束录音</button>
+              <button class="btn btn-outline-primary" onclick="pushToHardwareCard()"><i class="bi bi-arrow-up-right-circle me-1"></i>推送当前纪要到卡片</button>
+            </div>
+
+            <div class="bg-light p-3 rounded border">
+              <h6 class="fw-bold small text-secondary mb-2">卡片通信日志流 (NDJSON)</h6>
+              <pre class="mb-0 small text-dark" id="bridge-logs" style="max-height: 140px; overflow-y: auto;">[系统] 硬件桥接监听已就绪 (0.0.0.0:5566)</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    
+    <!-- TAB: 🤖 多机器人推送与渠道鉴权中心 -->
+    <div class="tab-pane fade" id="tab-bots" role="tabpanel">
+      <div class="card card-modern p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h4 class="fw-bold mb-1"><i class="bi bi-robot text-primary me-2"></i>多机器人推送与渠道鉴权中心</h4>
+            <p class="text-muted small mb-0">参考 sillyGirl 多渠道机器人架构，支持飞书、企业微信、钉钉加签、Telegram、QQ、PushPlus、Server酱、Bark 等全渠道多路并发鉴权与会议纪要推送。</p>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" type="button" onclick="testAllEnabledBots()"><i class="bi bi-lightning-charge me-1"></i>测试所有启用渠道</button>
+            <button class="btn btn-lark" type="button" onclick="saveAllBotChannels()"><i class="bi bi-save me-1"></i>保存所有机器人配置</button>
+          </div>
+        </div>
+
+        <div class="alert alert-info py-2 px-3 small mb-4">
+          <i class="bi bi-info-circle-fill me-1"></i>
+          <strong>多路广播特性</strong>：在“会议总结”或卡片录音结束后，系统会自动向下方所有<strong>已启用</strong>的机器人渠道并发推送结构化纪要与飞书文档跳转卡片。
+        </div>
+
+        
+        <!-- 📥 双向回调监听地址与指令手册 -->
+        <div class="row g-3 mb-4">
+          <div class="col-lg-6">
+            <div class="card card-modern p-3 h-100 bg-light border">
+              <h6 class="fw-bold mb-2"><i class="bi bi-box-arrow-in-right text-primary me-2"></i>双向事件 Webhook 回调接收端点</h6>
+              <p class="text-muted small mb-2" style="font-size: 12px;">请将以下地址填入各平台开放平台后台的“事件订阅 / Webhook 回调”中，以实现群聊 @机器人 互动：</p>
+              <div class="table-responsive">
+                <table class="table table-sm table-bordered bg-white small mb-0" style="font-size: 11px;">
+                  <tbody>
+                    <tr><td class="fw-semibold text-nowrap" style="width: 30%;">飞书事件订阅 (im.message)</td><td><code>/api/webhook/feishu</code> <span class="badge bg-secondary">支持 challenge 校验</span></td></tr>
+                    <tr><td class="fw-semibold text-nowrap">钉钉 Outgoing Webhook</td><td><code>/api/webhook/dingtalk</code></td></tr>
+                    <tr><td class="fw-semibold text-nowrap">企业微信回调</td><td><code>/api/webhook/wecom</code></td></tr>
+                    <tr><td class="fw-semibold text-nowrap">Telegram Webhook</td><td><code>/api/webhook/telegram</code></td></tr>
+                    <tr><td class="fw-semibold text-nowrap">QQ / OneBot 上报</td><td><code>/api/webhook/onebot</code></td></tr>
+                    <tr><td class="fw-semibold text-nowrap">通用系统 Webhook</td><td><code>/api/webhook/custom</code></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="card card-modern p-3 h-100 bg-light border">
+              <h6 class="fw-bold mb-2"><i class="bi bi-chat-left-dots-fill text-success me-2"></i>sillyGirl 双向互动指令手册</h6>
+              <p class="text-muted small mb-2" style="font-size: 12px;">群成员在群内 @机器人 或私聊时，可直接发送以下交互指令：</p>
+              <ul class="list-group list-group-flush bg-transparent small" style="font-size: 12px;">
+                <li class="list-group-item bg-transparent px-0 py-1"><strong><code>@机器人 总结 [讨论内容]</code></strong>：调用 AI 总结文本并自动创建飞书云文档后在群里回复卡片</li>
+                <li class="list-group-item bg-transparent px-0 py-1"><strong><code>@机器人 待办</code> / <code>todo</code></strong>：查看近期未完成行动项与负责人</li>
+                <li class="list-group-item bg-transparent px-0 py-1"><strong><code>@机器人 会议</code> / <code>历史</code></strong>：查询最近归档的会议与云文档直达链接</li>
+                <li class="list-group-item bg-transparent px-0 py-1"><strong><code>@机器人 状态</code> / <code>ping</code></strong>：实时汇报网关、AI 引擎与硬件连接状态</li>
+                <li class="list-group-item bg-transparent px-0 py-1"><strong><code>set [模块] [配置项] [值]</code></strong>：动态配置 Bucket 参数（例如 <code>set ai model gpt-4o</code>）</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+                                <div class="row g-4" id="bot-channels-container">
+          <!-- 0. 微信 ClawBot (原生微信扫码登录) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border border-success border-opacity-50" style="background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-wechat text-success fs-3 me-2"></i>
+                  <div>
+                    <h6 class="fw-bold mb-0">微信 ClawBot</h6>
+                    <span class="badge bg-success-subtle text-success" style="font-size: 10px;">原生微信扫码登录</span>
+                  </div>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-wechat_clawbot" onchange="toggleBotEnabled('wechat_clawbot', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-2" style="font-size: 12px; min-height: 32px;">基于 sillyGirl 微信 ClawBot/iLink/GeWe 协议，支持微信扫码登录、好友与群聊双向互动</p>
+              
+              <!-- 微信登录状态栏 -->
+              <div class="p-2 border rounded bg-white d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <img id="wechat-avatar" src="https://raw.githubusercontent.com/smallfawn/sillyGirl/master/logo.png" class="rounded-circle me-2 border" style="width: 32px; height: 32px; object-fit: cover;" onerror="this.src='https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/1f4ac.png'">
+                  <div>
+                    <div class="fw-bold small" id="wechat-user-nickname">未登录微信</div>
+                    <div class="text-muted" style="font-size: 10px;" id="wechat-user-wxid">点击右侧按钮扫码</div>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-success py-1 px-2" style="font-size: 11px;" onclick="openWeChatLoginModal()">
+                  <i class="bi bi-qr-code-scan me-1"></i>扫码登录
+                </button>
+              </div>
+
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">推送目标微信号 / 群ID (Target Wxid)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-wechat_clawbot-target_wxid" placeholder="如: wxid_xxxx 或 xxx@chatroom">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">ClawBot / GeWe API 地址</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-wechat_clawbot-base_api_url" value="http://127.0.0.1:2531" placeholder="http://127.0.0.1:2531">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">API Token / X-GEWE-TOKEN (可选)</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-wechat_clawbot-token" placeholder="自建服务 Token 密钥">
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('wechat_clawbot')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-wechat_clawbot" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+                    <!-- 1. 飞书机器人 / 开放平台 (自建应用 & 群 Webhook) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border border-primary border-opacity-50">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-feather text-primary fs-3 me-2"></i>
+                  <div>
+                    <h6 class="fw-bold mb-0">飞书机器人 / 开放平台</h6>
+                    <span class="badge bg-primary-subtle text-primary" style="font-size: 10px;">自建应用 / 云文档 / Webhook</span>
+                  </div>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-feishu" checked onchange="toggleBotEnabled('feishu', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-2" style="font-size: 12px; min-height: 32px;">支持飞书开放平台自建应用 OpenAPI (云文档自动生成、多维表格与双向@回帖) 及群 Webhook 互动卡片</p>
+              
+              <div class="flex-grow-1">
+                <!-- 开放平台自建应用凭证 (云文档创建与双向交互核心) -->
+                <div class="p-2 border rounded bg-light mb-2">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-bold text-dark small"><i class="bi bi-shield-lock-fill text-primary me-1"></i>开放平台凭证 (云文档与双向@回复)</span>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-primary" style="font-size: 11px;" onclick="testFeishuConnection()">
+                      <i class="bi bi-plug me-1"></i>测试 OpenAPI 连接
+                    </button>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small fw-semibold mb-0">自建应用 App ID</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-feishu-app_id" placeholder="cli_xxxxxxxx">
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small fw-semibold mb-0">自建应用 App Secret</label>
+                    <input type="password" class="form-control form-control-sm" id="bot-input-feishu-app_secret" placeholder="xxxxxxxxxxxxxx">
+                  </div>
+                  <div class="mb-1">
+                    <label class="form-label small fw-semibold mb-0">文档保存目录 Folder Token (可选)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-feishu-folder_token" placeholder="fldcnxxxxxxx">
+                  </div>
+                </div>
+
+                <!-- 群 Webhook 广播单向推送 -->
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold mb-0">群 Webhook URL (单向群卡片)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-feishu-webhook_url" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
+                </div>
+                <div class="row g-2 mb-1">
+                  <div class="col-8">
+                    <label class="form-label small fw-semibold mb-0">加签 Secret (可选)</label>
+                    <input type="password" class="form-control form-control-sm" id="bot-input-feishu-secret" placeholder="安全校验密钥">
+                  </div>
+                  <div class="col-4 d-flex align-items-end pb-1">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="bot-input-feishu-at_all">
+                      <label class="form-check-label small text-muted" for="bot-input-feishu-at_all">@所有人</label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('feishu')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-feishu" class="small text-success"><i class="bi bi-check-circle-fill"></i> 已启用</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 钉钉机器人 (Stream 模式 / Webhook) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-send-fill text-info fs-4 me-2"></i>
+                  <div>
+                    <h6 class="fw-bold mb-0">钉钉机器人</h6>
+                    <span class="badge bg-info-subtle text-info" style="font-size: 10px;">Stream 模式 / Webhook</span>
+                  </div>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-dingtalk" onchange="toggleBotEnabled('dingtalk', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-2" style="font-size: 12px; min-height: 32px;">钉钉开放平台应用的 Client ID（原 AppKey）。适配器使用 Stream 模式，不需要公网回调地址。</p>
+              
+              <div class="flex-grow-1">
+                <!-- Stream 模式配置区 -->
+                <div class="p-2 border rounded bg-light mb-2">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-bold text-dark small"><i class="bi bi-lightning-charge-fill text-warning me-1"></i>Stream 模式 (推荐)</span>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-info" style="font-size: 11px;" onclick="testDingTalkStream()">
+                      <i class="bi bi-plug me-1"></i>测试 Stream 连接
+                    </button>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small fw-semibold mb-0">Client ID (原 AppKey)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-dingtalk-client_id" placeholder="钉钉应用 Client ID">
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small fw-semibold mb-0">Client Secret (应用密钥)</label>
+                    <input type="password" class="form-control form-control-sm" id="bot-input-dingtalk-client_secret" placeholder="钉钉应用 Client Secret">
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="bot-input-dingtalk-debug_log">
+                    <label class="form-check-label small text-muted" for="bot-input-dingtalk-debug_log">开启钉钉调试日志</label>
+                  </div>
+                </div>
+
+                <!-- 群 Webhook 广播单向推送配置区 -->
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold mb-0">群 Webhook URL (单向广播，可选)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-dingtalk-webhook_url" placeholder="https://oapi.dingtalk.com/robot/send?access_token=...">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold mb-0">加签 Secret (SEC... 可选)</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-dingtalk-secret" placeholder="SECxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="row g-2">
+                  <div class="col-7">
+                    <label class="form-label small fw-semibold mb-0">@指定手机号 (逗号隔开)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-dingtalk-at_mobiles" placeholder="如: 13900000000">
+                  </div>
+                  <div class="col-5 d-flex align-items-end pb-1">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="bot-input-dingtalk-is_at_all">
+                      <label class="form-check-label small text-muted" for="bot-input-dingtalk-is_at_all">@所有人</label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('dingtalk')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-dingtalk" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. 企业微信群机器人 -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-chat-dots-fill text-success fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">企业微信群机器人</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-wecom" onchange="toggleBotEnabled('wecom', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">支持企业微信群 Markdown 格式消息、指定成员 @ 与手机号强提醒</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Webhook URL</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-wecom-webhook_url" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">@提醒成员 (User ID，逗号隔开 / @all)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-wecom-mentioned_list" placeholder="如: zhangsan,lisi 或 @all">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">@提醒手机号 (可选，逗号隔开)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-wecom-mentioned_mobile_list" placeholder="如: 13800138000">
+                </div>
+                <div class="row g-2">
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold">自建应用 CorpID (可选)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-wecom-corp_id" placeholder="ww...">
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold">AgentID (可选)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-wecom-agent_id" placeholder="1000002">
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('wecom')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-wecom" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. Telegram Bot -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-telegram text-primary fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">Telegram Bot</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-telegram" onchange="toggleBotEnabled('telegram', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">Telegram 官方 Bot API 消息推送，支持自定义反代网关与群组广播</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Bot Token (从 @BotFather 获取)</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-telegram-bot_token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Chat ID / 频道用户名</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-telegram-chat_id" placeholder="@channel_username 或 -100123456789">
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col-7">
+                    <label class="form-label small fw-semibold">API Base 网关 (国内反代)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-telegram-api_base" value="https://api.telegram.org" placeholder="https://api.telegram.org">
+                  </div>
+                  <div class="col-5">
+                    <label class="form-label small fw-semibold">HTTP 代理 (可选)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-telegram-proxy_url" placeholder="如: 127.0.0.1:7890">
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('telegram')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-telegram" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. QQ 机器人 (OneBot v11 / 反向 WS / 开放平台) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-tencent-qq text-danger fs-4 me-2"></i>
+                  <div>
+                    <h6 class="fw-bold mb-0">QQ 机器人</h6>
+                    <span class="badge bg-danger-subtle text-danger" style="font-size: 10px;">OneBot v11 / 反向 WS / 开放平台</span>
+                  </div>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-onebot" onchange="toggleBotEnabled('onebot', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-2" style="font-size: 12px; min-height: 32px;">支持 OneBot v11 (NapCat/Lagrange/Go-CQHTTP)、反向 WebSocket 长连接与 QQ 开放平台应用</p>
+              
+              <div class="flex-grow-1">
+                <!-- OneBot HTTP / WS 模式 -->
+                <div class="p-2 border rounded bg-light mb-2">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-bold text-dark small"><i class="bi bi-robot text-danger me-1"></i>OneBot v11 协议设置</span>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-danger" style="font-size: 11px;" onclick="testQQConnection()">
+                      <i class="bi bi-plug me-1"></i>测试连接
+                    </button>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small fw-semibold mb-0">OneBot HTTP API 接口地址</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-onebot-http_api_url" value="http://127.0.0.1:3000" placeholder="http://127.0.0.1:3000">
+                  </div>
+                  <div class="row g-2 mb-2">
+                    <div class="col-5">
+                      <label class="form-label small fw-semibold mb-0">目标类型</label>
+                      <select class="form-select form-select-sm" id="bot-input-onebot-target_type">
+                        <option value="group">QQ 群消息</option>
+                        <option value="private">好友私聊</option>
+                        <option value="guild">频道消息</option>
+                      </select>
+                    </div>
+                    <div class="col-7">
+                      <label class="form-label small fw-semibold mb-0">目标号码 (群号/QQ号)</label>
+                      <input type="text" class="form-control form-control-sm" id="bot-input-onebot-target_id" placeholder="如: 12345678">
+                    </div>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small fw-semibold mb-0">Access Token (可选 Bearer 密钥)</label>
+                    <input type="password" class="form-control form-control-sm" id="bot-input-onebot-access_token" placeholder="可选访问令牌">
+                  </div>
+                  <div class="alert alert-secondary py-1 px-2 mb-0" style="font-size: 11px;">
+                    <i class="bi bi-info-circle me-1"></i><strong>反向 WS 路径</strong>：可在 NapCat 中配置反向 WebSocket 为 <code>ws://127.0.0.1:8000/ws/onebot</code> 实现零公网双向长连接。
+                  </div>
+                </div>
+
+                <!-- 官方 AppID 与管理员 (可选) -->
+                <div class="row g-2 mb-2">
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold mb-0">管理员 QQ (Master ID)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-onebot-master_id" placeholder="主人 QQ 号">
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold mb-0">官方 AppID (可选)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-onebot-app_id" placeholder="开放平台 AppID">
+                  </div>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="bot-input-onebot-debug_log">
+                  <label class="form-check-label small text-muted" for="bot-input-onebot-debug_log">开启 QQ 调试日志</label>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('onebot')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-onebot" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 6. PushDeer (无界推送) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-send-check-fill text-primary fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">PushDeer (无界推送)</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-pushdeer" onchange="toggleBotEnabled('pushdeer', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">轻量开源无界推送服务，支持 iOS / Android / Mac 客户端与微信免装 App 接收</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">PushDeer PushKey</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-pushdeer-pushkey" placeholder="PDUxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">服务器 Endpoint (默认官方或自建)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-pushdeer-endpoint" value="https://api2.pushdeer.com" placeholder="https://api2.pushdeer.com">
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('pushdeer')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-pushdeer" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7. PushPlus (微信推送) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-wechat text-success fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">PushPlus (微信推送)</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-pushplus" onchange="toggleBotEnabled('pushplus', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">微信公众号一对多模板消息推送，无需自建公众号，扫码即收</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">PushPlus 用户 Token</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-pushplus-token" placeholder="从 pushplus.plus 获取">
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold">发送渠道 (Channel)</label>
+                    <select class="form-select form-select-sm" id="bot-input-pushplus-channel">
+                      <option value="wechat">微信公众号</option>
+                      <option value="cp">企业微信应用</option>
+                      <option value="mail">邮件通知</option>
+                      <option value="sms">手机短信</option>
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold">群组编码 Topic (可选)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-pushplus-topic" placeholder="群发时填写">
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('pushplus')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-pushplus" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 8. Server酱 (微信/Turbo) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-bell-fill text-warning fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">Server酱 (微信/Turbo)</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-serverchan" onchange="toggleBotEnabled('serverchan', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">方糖气球 Server酱 Turbo 版，支持微信服务号与多端并发推送</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Server酱 SendKey</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-serverchan-sendkey" placeholder="SCTxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">推送通道 (Channel)</label>
+                  <select class="form-select form-select-sm" id="bot-input-serverchan-channel">
+                    <option value="9">微信测试号 (默认)</option>
+                    <option value="18">企业微信应用消息</option>
+                    <option value="19">钉钉群机器人</option>
+                    <option value="88">飞书群机器人</option>
+                    <option value="98">PushDeer</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('serverchan')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-serverchan" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 9. Bark (iOS 实时通知) -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-apple text-dark fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">Bark (iOS 实时通知)</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-bark" onchange="toggleBotEnabled('bark', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">苹果 iOS 设备原生极速弹窗通知，支持自定义铃声与飞书云文档直达</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Bark Device Key (设备密钥)</label>
+                  <input type="password" class="form-control form-control-sm" id="bot-input-bark-device_key" placeholder="从 Bark App 获取">
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col-7">
+                    <label class="form-label small fw-semibold">Bark 服务器地址</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-bark-server_url" value="https://api.day.app" placeholder="https://api.day.app">
+                  </div>
+                  <div class="col-5">
+                    <label class="form-label small fw-semibold">提示音 (Sound)</label>
+                    <select class="form-select form-select-sm" id="bot-input-bark-sound">
+                      <option value="minuet">小步舞曲</option>
+                      <option value="bell">清脆铃声</option>
+                      <option value="glass">玻璃敲击</option>
+                      <option value="alarm">警报强提醒</option>
+                      <option value="chime">风铃声</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold">通知分组 (Group)</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-bark-group" value="会议纪要">
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label small fw-semibold">中断级别 (Level)</label>
+                    <select class="form-select form-select-sm" id="bot-input-bark-level">
+                      <option value="active">普通 (active)</option>
+                      <option value="timeSensitive">重要时效性 (timeSensitive)</option>
+                      <option value="passive">静默 (passive)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('bark')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-bark" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 10. Discord 机器人 -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-discord text-primary fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">Discord 机器人</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-discord" onchange="toggleBotEnabled('discord', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">支持 Discord Webhook 频道富文本 Embed 结构化会议纪要卡片直推</p>
+              
+              <div class="flex-grow-1">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Discord Webhook URL</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-discord-webhook_url" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">自定义机器人名称 (Username)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-discord-username" value="AI 会议助手" placeholder="AI 会议助手">
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('discord')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-discord" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 11. 自定义 Webhook -->
+          <div class="col-lg-4 col-md-6">
+            <div class="card card-modern h-100 p-3 border">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex align-items-center">
+                  <i class="bi bi-code-slash text-secondary fs-4 me-2"></i>
+                  <h6 class="fw-bold mb-0">自定义 Webhook</h6>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="bot-enabled-custom" onchange="toggleBotEnabled('custom', this.checked)">
+                </div>
+              </div>
+              <p class="text-muted small mb-3" style="font-size: 12px; min-height: 32px;">通用标准 HTTP POST/PUT JSON 接口，支持向任意 OA/ERP 系统推送纪要</p>
+              
+              <div class="flex-grow-1">
+                <div class="row g-2 mb-2">
+                  <div class="col-8">
+                    <label class="form-label small fw-semibold">Webhook 接口 URL</label>
+                    <input type="text" class="form-control form-control-sm" id="bot-input-custom-webhook_url" placeholder="https://your-domain.com/api/hook">
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label small fw-semibold">HTTP Method</label>
+                    <select class="form-select form-select-sm" id="bot-input-custom-http_method">
+                      <option value="POST">POST</option>
+                      <option value="PUT">PUT</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">认证请求头 (Authorization / X-Api-Key)</label>
+                  <input type="text" class="form-control form-control-sm" id="bot-input-custom-auth_header" placeholder="如: Bearer sk-xxxx 或 X-Api-Key: xxx">
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="testSingleBot('custom')"><i class="bi bi-lightning-charge me-1"></i>发送测试</button>
+                <span id="bot-badge-custom" class="small text-muted">未开启</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: 多 AI 模型与系统配置 -->
+    <div class="tab-pane fade" id="tab-settings" role="tabpanel">
+      <div class="row g-4">
+        <!-- AI 模型配置卡片 -->
+        <div class="col-lg-7">
+          <div class="card card-modern p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold mb-0"><i class="bi bi-robot text-primary me-2"></i>多 AI 大模型配置中心</h5>
+              <button class="btn btn-sm btn-outline-primary" onclick="addNewAIProvider()"><i class="bi bi-plus-lg me-1"></i>+ 新增模型</button>
+            </div>
+
+            <!-- 一键预设按钮池 -->
+            <div class="mb-3">
+              <label class="form-label small text-muted fw-semibold">快速切换 / 选择大模型服务商：</label>
+              <div class="d-flex flex-wrap gap-2" id="preset-buttons-container">
+                <button type="button" class="btn btn-sm btn-outline-primary ai-preset-btn active" onclick="selectAIProvider('deepseek')"><i class="bi bi-check2-circle me-1"></i>DeepSeek</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ai-preset-btn" onclick="selectAIProvider('doubao')">火山引擎 / 豆包</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ai-preset-btn" onclick="selectAIProvider('openai')">OpenAI</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ai-preset-btn" onclick="selectAIProvider('qwen')">通义千问 (Qwen)</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ai-preset-btn" onclick="selectAIProvider('moonshot')">月之暗面 (Kimi)</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ai-preset-btn" onclick="selectAIProvider('newapi')">自建 NewAPI 网关</button>
+              </div>
+            </div>
+
+            <!-- 当前选中的 AI 配置表单 -->
+            <div class="bg-light p-3 rounded border mb-3">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label fw-semibold">AI 服务商名称</label>
+                  <input type="text" class="form-control" id="cur-ai-name" placeholder="DeepSeek">
+                </div>
+                <div class="col-md-6">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <label class="form-label fw-semibold mb-0">模型标识 (Model)</label>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-primary" style="font-size: 11px;" onclick="fetchGatewayModels()">
+                      <i class="bi bi-cloud-arrow-down me-1"></i>从网关拉取模型列表 (/v1/models)
+                    </button>
+                  </div>
+                  <input type="text" class="form-control" id="cur-ai-model" placeholder="gpt-4o" oninput="renderModelTagsForCurrent()">
+                  <div class="d-flex flex-wrap gap-1 mt-2" id="cur-ai-model-tags"></div>
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-semibold">API Base URL</label>
+                  <input type="text" class="form-control" id="cur-ai-base-url" placeholder="https://api.deepseek.com/v1">
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-semibold">API Key (密钥)</label>
+                  <input type="password" class="form-control" id="cur-ai-key" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-semibold">温度 (Temperature)</label>
+                  <input type="number" step="0.1" min="0" max="1" class="form-control" id="cur-ai-temp" value="0.3">
+                </div>
+                <div class="col-md-6 d-flex align-items-end">
+                  <button class="btn btn-outline-danger w-100" id="btn-delete-ai" onclick="deleteCurrentAIProvider()"><i class="bi bi-trash me-1"></i>删除此 AI 配置</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 连接测试与激活 -->
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div>
+                <button class="btn btn-outline-success" id="btn-test-ai" onclick="testAIConnection()">
+                  <i class="bi bi-lightning-charge-fill me-1"></i>⚡ 测试当前 AI 连接 (Ping)
+                </button>
+                <span id="ai-test-result-badge" class="ms-2"></span>
+              </div>
+              <button class="btn btn-primary" onclick="applyCurrentAIAsActive()"><i class="bi bi-check2-circle me-1"></i>设为当前激活模型</button>
+            </div>
+          </div>
+        </div>
+
+                <!-- 数据库与系统端口配置 -->
+        <div class="col-lg-5">
+          <!-- PostgreSQL 企业数据库配置 -->
+          <div class="card card-modern p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h5 class="fw-bold mb-0"><i class="bi bi-database-fill-check text-primary me-2"></i>PostgreSQL 企业数据库</h5>
+              <button class="btn btn-sm btn-outline-primary" type="button" onclick="testPGConnection()"><i class="bi bi-lightning-charge me-1"></i>测试 PG 连接</button>
+            </div>
+            <p class="text-muted small mb-3">开启后，用户账户、密码、AI 配置与会议纪要归档将持久化至 PostgreSQL，保障数据安全与高并发。</p>
+
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" id="cfg-pg-enabled">
+              <label class="form-check-label fw-semibold" for="cfg-pg-enabled">启用 PostgreSQL 数据库存储</label>
+            </div>
+
+            <div class="row g-2" id="pg-config-inputs">
+              <div class="col-8">
+                <label class="form-label small fw-semibold">PG 主机地址 (Host)</label>
+                <input type="text" class="form-control form-control-sm" id="cfg-pg-host" placeholder="127.0.0.1 或 远程IP">
+              </div>
+              <div class="col-4">
+                <label class="form-label small fw-semibold">端口 (Port)</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-pg-port" placeholder="5432">
+              </div>
+              <div class="col-6">
+                <label class="form-label small fw-semibold">数据库名 (Database)</label>
+                <input type="text" class="form-control form-control-sm" id="cfg-pg-db" placeholder="feishu_meeting">
+              </div>
+              <div class="col-6">
+                <label class="form-label small fw-semibold">用户名 (User)</label>
+                <input type="text" class="form-control form-control-sm" id="cfg-pg-user" placeholder="postgres">
+              </div>
+              <div class="col-12">
+                <label class="form-label small fw-semibold">密码 (Password)</label>
+                <input type="password" class="form-control form-control-sm" id="cfg-pg-pwd" placeholder="数据库访问密码">
+              </div>
+            </div>
+            <div id="pg-test-badge" class="mt-2 small d-none"></div>
+          </div>
+
+          <!-- 服务器与硬件端口配置 -->
+          <div class="card card-modern p-4 mb-4">
+            <h5 class="fw-bold mb-3"><i class="bi bi-globe text-primary me-2"></i>服务器与硬件通信端口</h5>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">Web 浏览器端口</label>
+                <input type="number" class="form-control" id="cfg-web-port" placeholder="8000">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">AI Passport 硬件端口</label>
+                <input type="number" class="form-control" id="cfg-bridge-port" placeholder="5566">
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold">Web 监听主机 (Host)</label>
+                <input type="text" class="form-control" id="cfg-web-host" placeholder="127.0.0.1 或 0.0.0.0">
+                <div class="form-text">若部署在云服务器或局域网，Host 请设置为 <code>0.0.0.0</code>。</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 机器人与推送渠道引导卡片 -->
+          <div class="card card-modern p-4">
+            <div class="p-3 border rounded bg-light mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="fw-bold text-dark small"><i class="bi bi-robot text-primary me-1"></i>飞书与 12 大机器人渠道中心</span>
+                <button type="button" class="btn btn-sm btn-primary py-1 px-2" style="font-size: 11px;" onclick="document.querySelector('[data-bs-target=\'#tab-bots\']').click()">
+                  <i class="bi bi-arrow-right-circle me-1"></i>前往机器人推送中心 ➔
+                </button>
+              </div>
+              <div class="text-muted" style="font-size: 11px; line-height: 1.4;">
+                飞书开放平台自建应用 (App ID / Secret / 云文档目录)、微信 ClawBot、钉钉 Stream、企业微信、QQ OneBot 等 12 大平台已统一在【多机器人推送中心】集中配置与鉴权。
+              </div>
+            </div>
+
+            <div class="d-grid">
+              <button class="btn btn-lark py-2" onclick="saveAllConfiguration()"><i class="bi bi-save me-1"></i> 保存所有系统与 AI 配置并生效</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: 文档归档与历史记录 -->
+    <div class="tab-pane fade" id="tab-history" role="tabpanel">
+      <div class="card card-modern p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <h5 class="fw-bold mb-1"><i class="bi bi-journal-text text-primary me-2"></i>飞书云文档与会议纪要归档库</h5>
+            <p class="text-muted small mb-0">所有通过卡片录音、音频转写、飞书妙记生成的纪要与飞书文档链接均会自动归档在此，支持一键打开、复制链接与重新推送到飞书群。</p>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-primary fs-6 px-3 py-2" id="history-total-count">共 0 篇文档</span>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadHistoryRecords()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="clearAllHistoryRecords()"><i class="bi bi-trash me-1"></i>清空归档</button>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="input-group">
+            <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="history-search-input" placeholder="按会议标题、日期、责任人或决议关键词实时过滤搜索..." oninput="filterHistoryRecords()">
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0" id="history-table">
+            <thead class="table-light">
+              <tr>
+                <th style="width: 32%;">会议标题 / 纪要名称</th>
+                <th style="width: 14%;">来源 & 场景</th>
+                <th style="width: 16%;">生成时间 / 时长</th>
+                <th style="width: 15%;">核心决议 / 待办</th>
+                <th style="width: 23%;" class="text-end">飞书文档直达与操作</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="history-empty-state" class="text-center py-5 d-none">
+          <i class="bi bi-folder-x text-muted" style="font-size: 3rem;"></i>
+          <p class="text-muted mt-2">暂无归档会议纪要，您可以在“音频/文本总结”或通过卡片录音生成纪要与飞书文档！</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 6: 📖 配置说明手册 (完整全景指南) -->
+    <div class="tab-pane fade" id="tab-docs" role="tabpanel">
+      <div class="card card-modern p-4 mb-4" style="background: linear-gradient(135deg, #f0f7ff 0%, #ffffff 100%);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+          <div>
+            <h4 class="fw-bold text-dark mb-1"><i class="bi bi-book-half text-primary me-2"></i>会议智能妙记系统 · 深度配置说明手册</h4>
+            <p class="text-muted mb-0">涵盖多 AI 大模型中枢 (NewAPI)、飞书开放平台生态、sillyGirl 9 大机器人双向交互、AI Passport 硬件胸卡与 PostgreSQL 数据库部署全流程。</p>
+          </div>
+          <div class="badge bg-primary fs-6 px-3 py-2">
+            <i class="bi bi-patch-check-fill me-1"></i> Production v2.5
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-4">
+        <!-- 左侧快捷导航 -->
+        <div class="col-lg-3">
+          <div class="card card-modern p-3 sticky-top" style="top: 20px; z-index: 10;">
+            <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-list-nested me-2"></i>手册导航目录</h6>
+            <div class="list-group list-group-flush small">
+              <a href="#doc-ai-models" class="list-group-item list-group-item-action py-2 border-0 rounded mb-1"><i class="bi bi-cpu text-primary me-2"></i>1. 多 AI 大模型中枢配置</a>
+              <a href="#doc-feishu-app" class="list-group-item list-group-item-action py-2 border-0 rounded mb-1"><i class="bi bi-cloud-check text-info me-2"></i>2. 飞书开放平台与云文档</a>
+              <a href="#doc-sillygirl-bots" class="list-group-item list-group-item-action py-2 border-0 rounded mb-1"><i class="bi bi-robot text-success me-2"></i>3. sillyGirl 双向机器人配置</a>
+              <a href="#doc-hardware-card" class="list-group-item list-group-item-action py-2 border-0 rounded mb-1"><i class="bi bi-badge-ad text-warning me-2"></i>4. AI Passport 硬件胸卡配网</a>
+              <a href="#doc-database-pg" class="list-group-item list-group-item-action py-2 border-0 rounded mb-1"><i class="bi bi-database-check text-primary me-2"></i>5. PostgreSQL 企业数据库</a>
+              <a href="#doc-nat-traversal" class="list-group-item list-group-item-action py-2 border-0 rounded mb-1"><i class="bi bi-globe2 text-danger me-2"></i>6. 内网穿透与外网回调</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧详细手册内容 -->
+        <div class="col-lg-9">
+          
+          <!-- 1. 多 AI 大模型配置 -->
+          <div class="card card-modern p-4 mb-4" id="doc-ai-models">
+            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+              <i class="bi bi-cpu text-primary me-2"></i>1. 多 AI 大模型中枢配置 (参考 NewAPI 架构)
+            </h5>
+            <p class="text-muted small">系统内置统一 OpenAI 规范协议客户端，支持直连官方 API 或自建 NewAPI / One API 中转分发网关。</p>
+            
+            <div class="table-responsive mb-3">
+              <table class="table table-bordered table-sm align-middle small">
+                <thead class="table-light">
+                  <tr>
+                    <th>服务商</th>
+                    <th>Base URL (接口地址)</th>
+                    <th>常用模型名称 (Model)</th>
+                    <th>API Key 获取途径</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>DeepSeek (深度求索)</strong></td>
+                    <td><code>https://api.deepseek.com/v1</code></td>
+                    <td><code>deepseek-chat</code> / <code>deepseek-reasoner</code></td>
+                    <td><a href="https://platform.deepseek.com/" target="_blank">DeepSeek 开放平台</a></td>
+                  </tr>
+                  <tr>
+                    <td><strong>火山引擎 / 豆包 (Doubao)</strong></td>
+                    <td><code>https://ark.cn-beijing.volces.com/api/v3</code></td>
+                    <td><code>ep-2025xxxx-xxxx</code> (推理接入点)</td>
+                    <td><a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a></td>
+                  </tr>
+                  <tr>
+                    <td><strong>OpenAI (官方/中转)</strong></td>
+                    <td><code>https://api.openai.com/v1</code></td>
+                    <td><code>gpt-4o</code> / <code>gpt-4o-mini</code> / <code>o1</code></td>
+                    <td><a href="https://platform.openai.com/" target="_blank">OpenAI Platform</a></td>
+                  </tr>
+                  <tr>
+                    <td><strong>阿里云百炼 (通义千问)</strong></td>
+                    <td><code>https://dashscope.aliyuncs.com/compatible-mode/v1</code></td>
+                    <td><code>qwen-plus</code> / <code>qwen-max</code> / <code>qwen-turbo</code></td>
+                    <td><a href="https://bailian.console.aliyun.com/" target="_blank">阿里云百炼平台</a></td>
+                  </tr>
+                  <tr>
+                    <td><strong>月之暗面 (Kimi / Moonshot)</strong></td>
+                    <td><code>https://api.moonshot.cn/v1</code></td>
+                    <td><code>moonshot-v1-8k</code> / <code>moonshot-v1-32k</code></td>
+                    <td><a href="https://platform.moonshot.cn/" target="_blank">Moonshot 开放平台</a></td>
+                  </tr>
+                  <tr>
+                    <td><strong>自建 NewAPI / One API</strong></td>
+                    <td><code>http://your-newapi-host:3000/v1</code></td>
+                    <td>自定义聚合模型名</td>
+                    <td>您的自建 NewAPI 令牌管理页</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="alert alert-info py-2 small mb-0">
+              <i class="bi bi-info-circle me-1"></i><strong>配置技巧</strong>：在【多 AI 模型与系统配置】页面中，点击预设服务商可一键自动填充 Base URL，填入 Key 后点击 <strong>“⚡ 测试模型连通性”</strong> 即可实时测试毫秒级延迟！
+            </div>
+          </div>
+
+          <!-- 2. 飞书开放平台配置 -->
+          <div class="card card-modern p-4 mb-4" id="doc-feishu-app">
+            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+              <i class="bi bi-cloud-check text-info me-2"></i>2. 飞书开放平台与官方云文档 (Docx / Bitable) 对接
+            </h5>
+            
+            <h6 class="fw-bold text-dark mt-3">步骤 ①：创建飞书企业自建应用</h6>
+            <ol class="small text-muted mb-3">
+              <li>登录 <a href="https://open.feishu.cn/" target="_blank">飞书开放平台</a> ➔ 点击右上角【开发者后台】➔【创建企业自建应用】；</li>
+              <li>在【凭证与基础信息】中获取 <strong>App ID</strong> (如 <code>cli_a1b2c3d4e5f6</code>) 和 <strong>App Secret</strong>，并填入本系统配置中。</li>
+            </ol>
+
+            <h6 class="fw-bold text-dark mt-3">步骤 ②：开通云文档与多维表格权限 (重要)</h6>
+            <p class="small text-muted mb-2">进入自建应用的【权限管理】，搜索并开通以下核心权限（开通后需创建版本并发布生效）：</p>
+            <div class="row g-2 mb-3">
+              <div class="col-md-6">
+                <div class="p-2 border rounded bg-light small">
+                  <span class="badge bg-primary me-1">docx:document</span> <strong>创建与编辑云文档</strong>
+                  <div class="text-muted" style="font-size: 11px;">用于会议总结完成后自动创建飞书 Docx 官方云文档</div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="p-2 border rounded bg-light small">
+                  <span class="badge bg-primary me-1">drive:drive</span> <strong>云空间文件管理</strong>
+                  <div class="text-muted" style="font-size: 11px;">用于将生成的会议纪要保存至指定的飞书云文件夹</div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="p-2 border rounded bg-light small">
+                  <span class="badge bg-success me-1">bitable:app</span> <strong>多维表格数据读写</strong>
+                  <div class="text-muted" style="font-size: 11px;">用于将行动项 Todo 批量同步写入多维表格任务看板</div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="p-2 border rounded bg-light small">
+                  <span class="badge bg-info text-dark me-1">im:message</span> <strong>发送与读取消息</strong>
+                  <div class="text-muted" style="font-size: 11px;">用于群内机器人推送富文本互动卡片与双向指令监听</div>
+                </div>
+              </div>
+            </div>
+
+            <h6 class="fw-bold text-dark mt-3">步骤 ③：配置飞书群自定义机器人 Webhook (快速推送)</h6>
+            <p class="small text-muted mb-0">在任意飞书群 ➔ 点击群设置 ➔【机器人】➔【添加自定义机器人】➔ 复制 <code>Webhook URL</code> 和 <code>加签 Secret</code> 填入本系统即可。</p>
+          </div>
+
+          <!-- 3. sillyGirl 双向机器人配置 -->
+                    <!-- 3. sillyGirl 双向机器人配置 -->
+                    <!-- 3. sillyGirl 双向机器人配置 -->
+                    <!-- 3. sillyGirl 双向机器人配置 -->
+          <div class="card card-modern p-4 mb-4" id="doc-sillygirl-bots">
+            <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+              <h5 class="fw-bold text-dark mb-0">
+                <i class="bi bi-robot text-success me-2"></i>3. 全球 12 大机器人与推送渠道技术规范与配置实战全景
+              </h5>
+              <span class="badge bg-success-subtle text-success border border-success">全协议覆盖</span>
+            </div>
+
+            <div class="alert alert-warning py-2 px-3 small mb-4">
+              <i class="bi bi-exclamation-triangle-fill me-1"></i>
+              <strong>核心认知</strong>：<strong>飞书、企业微信的普通“群自定义 Webhook 机器人”仅支持单向推送！</strong>若需要群内 <code>@机器人</code> 能自动思考并回复，建议：飞书开通自建应用事件订阅、钉钉开启 Stream 模式、QQ 开启反向 WebSocket、微信使用 ClawBot 扫码登录。
+            </div>
+            
+            <div class="accordion" id="botsAccordion">
+              <!-- 0. 微信 ClawBot (原生微信扫码登录) -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button fw-semibold text-success" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocWechatClaw">
+                    <i class="bi bi-wechat me-2"></i>0. 微信 ClawBot (sillyGirl 微信协议 · 扫码登录与双向群聊交互)
+                  </button>
+                </h2>
+                <div id="collapseDocWechatClaw" class="accordion-collapse collapse show">
+                  <div class="accordion-body small text-muted">
+                    <div class="alert alert-success-subtle border border-success py-2 px-3 mb-3">
+                      <strong>💡 sillyGirl 微信对接模式</strong>：通过微信 ClawBot / iLink / GeWeChat 框架协议，实现<strong>原生个人微信号或企业客服号扫码挂载</strong>，支持好友私聊与微信群聊（<code>xxxx@chatroom</code>）的双向智能互动。
+                    </div>
+                    <h6>🛠️ 扫码登录与生命周期（Lifecycle）流程：</h6>
+                    <ol>
+                      <li><strong>获取二维码</strong>：在【多机器人推送中心】微信卡片中点击 <strong>【📲 扫码登录】</strong>，系统将生成微信登录凭据（UUID）与二维码；</li>
+                      <li><strong>扫码与手机点击确认</strong>：使用手机微信扫描屏幕二维码，手机端弹出“确认登录”点击授权；系统将自动轮询并获取 <code>wxid</code>、昵称与头像并持久化存储；</li>
+                      <li><strong>双向消息路由与回复</strong>：微信网关将事件 POST 至 <code>/api/webhook/clawbot</code>，系统智能处理后自动调用 API 回复；</li>
+                      <li><strong>会议纪要广播推送</strong>：在配置卡片中填写目标 <code>Target Wxid</code>（好友微信 wxid 或微信群 <code>xxxx@chatroom</code>），完成会议总结后将一键推送纪要与飞书文档直达链接！</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 1. 飞书群机器人 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocFeishu">
+                    🪶 1. 飞书 (Feishu) 机器人：单向群 Webhook 与自建应用双向回复
+                  </button>
+                </h2>
+                <div id="collapseDocFeishu" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <div class="p-3 border rounded bg-light h-100">
+                          <h6 class="fw-bold text-primary mb-2">模式 A：群自定义 Webhook 机器人 (仅单向推送)</h6>
+                          <p class="mb-1"><strong>定位</strong>：仅用于会议总结完成后，系统向飞书群单向推送富文本卡片。</p>
+                          <p class="mb-0"><strong>获取</strong>：飞书群设置 ➔ 机器人 ➔ 添加【自定义机器人】➔ 复制 Webhook 地址与加签 Secret。</p>
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <div class="p-3 border rounded bg-light h-100">
+                          <h6 class="fw-bold text-success mb-2">模式 B：企业自建应用机器人 (支持群内双向 @回复)</h6>
+                          <p class="mb-1"><strong>定位</strong>：群成员 <code>@机器人 总结/待办/状态</code> 时，机器人自动处理并在群内回复。</p>
+                          <p class="mb-0"><strong>配置</strong>：飞书开发者后台 ➔ 自建应用 ➔ 启用【机器人】能力 ➔【事件订阅】填写 <code>/api/webhook/feishu</code> ➔ 勾选 <code>im.message.receive_v1</code> 消息接收事件。</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. 钉钉机器人 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocDing">
+                    📌 2. 钉钉 (DingTalk) 机器人：Stream 模式 (推荐·无需公网IP) 与 Webhook 广播
+                  </button>
+                </h2>
+                <div id="collapseDocDing" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <div class="p-3 border rounded bg-light mb-3">
+                      <h6 class="fw-bold text-info mb-2"><i class="bi bi-lightning-charge-fill text-warning me-1"></i>模式 A：Stream 模式长连接 (推荐 · 无需公网 IP / 穿透域名)</h6>
+                      <p class="mb-1"><strong>原理</strong>：钉钉开放平台应用的 <strong>Client ID</strong>（原 AppKey）与 <strong>Client Secret</strong>（原 AppSecret）。适配器使用 Stream WebSocket 模式，<strong>不需要公网回调地址</strong>，内网机器直接建立长连接双向收发！</p>
+                      <p class="mb-1"><strong>获取方式</strong>：登录 <a href="https://open.dingtalk.com/" target="_blank">钉钉开放平台</a> ➔【应用开发】➔【企业内部开发】➔ 创建应用 ➔ 获取 <strong>Client ID</strong> 和 <strong>Client Secret</strong> ➔ 在【机器人】菜单中启用机器人能力并选择 Stream 模式；</p>
+                      <p class="mb-0"><strong>调试日志</strong>：在配置中勾选【开启钉钉调试日志】，可在控制台实时查看与钉钉 Stream 网关的 WebSocket 握手报文与心跳 Ping/Pong。</p>
+                    </div>
+
+                    <div class="p-3 border rounded bg-light">
+                      <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-broadcast text-primary me-1"></i>模式 B：群自定义 Webhook (单向群广播)</h6>
+                      <p class="mb-1"><strong>定位</strong>：仅用于会议总结完成后向钉钉群单向推送 Markdown 纪要。</p>
+                      <p class="mb-0"><strong>获取</strong>：钉钉群 ➔ 智能群助手 ➔ 添加自定义机器人 ➔ 获取 Webhook URL 与加签 Secret (<code>SECxxxxxxxx</code>)。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. 企业微信 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocWecom">
+                    🏢 3. 企业微信 (WeCom) 机器人：群 Webhook 与自建应用回调
+                  </button>
+                </h2>
+                <div id="collapseDocWecom" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <ul>
+                      <li><strong>单向推送</strong>：群设置 ➔ 添加群机器人 ➔ 获取 Webhook URL，支持 <code>mentioned_list</code> (@成员) 与 <code>mentioned_mobile_list</code> (@手机号)；</li>
+                      <li><strong>自建应用推送与回调</strong>：在企业微信管理后台创建自建应用，配置 CorpID、AgentID 与 AppSecret，支持企业全员或部门精准下发。</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. QQ 机器人 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold text-danger" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocQQ">
+                    🐧 4. QQ 机器人：OneBot v11 标准协议、反向 WebSocket 长连接与开放平台
+                  </button>
+                </h2>
+                <div id="collapseDocQQ" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <div class="p-3 border rounded bg-light mb-3">
+                      <h6 class="fw-bold text-danger mb-2"><i class="bi bi-broadcast-pin text-primary me-1"></i>模式 A：OneBot 反向 WebSocket 长连接 (推荐·零公网双向直连)</h6>
+                      <p class="mb-1"><strong>原理</strong>：在 NapCat / Lagrange / Go-CQHTTP 配置文件中，添加反向 WebSocket 地址：</p>
+                      <pre class="bg-dark text-white p-2 rounded small mb-2"><code>"websocket": [{"type": "reverse", "url": "ws://127.0.0.1:8000/ws/onebot"}]</code></pre>
+                      <p class="mb-0">NapCat 会主动向本系统发起长连接，群聊消息即时推入，系统自动回复，<strong>免公网 IP、免端口转发</strong>。</p>
+                    </div>
+
+                    <div class="p-3 border rounded bg-light">
+                      <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-hdd-network me-1"></i>模式 B：OneBot 正向 HTTP API + Webhook 上报</h6>
+                      <p class="mb-1"><strong>HTTP 接口地址</strong>：默认 <code>http://127.0.0.1:3000</code>，填入目标群号或 QQ 号；</p>
+                      <p class="mb-0"><strong>HTTP 上报</strong>：在 OneBot 中将 <code>http_post</code> 设为 <code>http://127.0.0.1:8000/api/webhook/onebot</code> 即可实现双向同步。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. PushDeer 无界推送 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold text-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocPushDeer">
+                    🦌 5. PushDeer (轻量开源无界推送)
+                  </button>
+                </h2>
+                <div id="collapseDocPushDeer" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <p class="mb-1"><strong>PushKey 获取</strong>：打开 PushDeer App 或扫码绑定微信公众号，获取以 <code>PDU...</code> 开头的 PushKey；</p>
+                    <p class="mb-0"><strong>自建服务器</strong>：支持填写私有部署的 PushDeer 服务器 Endpoint（默认 <code>https://api2.pushdeer.com</code>）。</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 6. Telegram Bot -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold text-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocTg">
+                    ✈️ 6. Telegram 机器人 (Bot API & 反代网关)
+                  </button>
+                </h2>
+                <div id="collapseDocTg" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <p class="mb-2"><strong>Telegram</strong>：基于官方统一 Bot Token，支持通过 <code>/api/webhook/telegram</code> 接收群聊与私聊指令，并调用 <code>sendMessage</code> API 实时回复；</p>
+                    <p class="mb-0"><strong>国内反代网关与代理</strong>：可自定义 API Base 网关地址或填入本地 HTTP 代理（如 <code>127.0.0.1:7890</code>），解决境内网络环境访问问题。</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 7. Discord 机器人 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold text-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocDiscord">
+                    🎮 7. Discord 机器人 (频道 Webhook & Embed 富文本卡片)
+                  </button>
+                </h2>
+                <div id="collapseDocDiscord" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <p class="mb-1"><strong>获取方式</strong>：进入 Discord 服务器 ➔ 频道设置 ➔【整合】➔【Webhooks】➔【创建 Webhook】➔ 复制 Webhook URL；</p>
+                    <p class="mb-0"><strong>呈现效果</strong>：推送高颜值的 Discord Embed 结构化会议纪要卡片，带决议与行动项清单直达链接。</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 8. 其他通知通道 -->
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDocOthers">
+                    📱 8. PushPlus / Server酱 / Bark (微信模板消息与 iOS 极速弹窗)
+                  </button>
+                </h2>
+                <div id="collapseDocOthers" class="accordion-collapse collapse">
+                  <div class="accordion-body small text-muted">
+                    <p class="mb-1"><strong>PushPlus & Server酱</strong>：微信公众号模板消息推送，支持一对多群发订阅；</p>
+                    <p class="mb-0"><strong>Bark (iOS)</strong>：支持自定义铃声、时效性中断级别（<code>timeSensitive</code>），用户点击手机通知横幅秒级直达飞书云文档！</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 4. AI Passport 硬件胸卡配网 -->
+          <div class="card card-modern p-4 mb-4" id="doc-hardware-card">
+            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+              <i class="bi bi-badge-ad text-warning me-2"></i>4. AI Passport (ESP32-C3) 智能硬件胸卡配网与联调
+            </h5>
+            
+            <div class="row g-3">
+              <div class="col-md-6">
+                <div class="p-3 border rounded bg-light h-100 small">
+                  <h6 class="fw-bold text-dark"><i class="bi bi-wifi text-primary me-1"></i>首次配网与连接服务端</h6>
+                  <ol class="mb-0 ps-3 text-muted">
+                    <li>长按胸卡侧边电源键 3 秒开机；</li>
+                    <li>手机连接胸卡热点 <code>AI-Passport-Setup</code>；</li>
+                    <li>浏览器打开 <code>http://192.168.4.1</code>；</li>
+                    <li>输入 Wi-Fi 密码，服务器 IP 填电脑局域网 IP (如 <code>192.168.1.100</code>)，端口填 <code>5566</code>；</li>
+                    <li>保存重启后，工作台首页将自动亮起绿色在线指示。</li>
+                  </ol>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="p-3 border rounded bg-light h-100 small">
+                  <h6 class="fw-bold text-dark"><i class="bi bi-arrow-repeat text-danger me-1"></i>重置 Wi-Fi 无线配置</h6>
+                  <ul class="mb-0 ps-3 text-muted">
+                    <li><strong>物理按键重置</strong>：开机状态下<strong>长按【OK 键】5~8 秒</strong>，屏幕提示 <code>Resetting Wi-Fi...</code> 后自动进入 AP 配网模式；</li>
+                    <li><strong>组合开机</strong>：关机状态下按住【OK 键】不放，同时长按【电源键】开机；</li>
+                    <li><strong>串口重置</strong>：连接 Type-C 串口发送 <code>reset_wifi</code>。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. PostgreSQL 企业数据库 -->
+          <div class="card card-modern p-4 mb-4" id="doc-database-pg">
+            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+              <i class="bi bi-database-check text-primary me-2"></i>5. PostgreSQL 16 企业数据库配置与 Docker 一键部署
+            </h5>
+            
+            <p class="small text-muted">本系统默认使用 PostgreSQL 16 关系型数据库存储 13 张核心业务表与复合索引。支持 Docker Compose 一键拉起：</p>
+            
+            <div class="bg-dark text-light p-3 rounded mb-3 small" style="font-family: monospace;">
+              <div class="text-secondary mb-1"># 在打包工程目录执行一键容器化部署</div>
+              <div class="text-success">docker-compose up -d --build</div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered small">
+                <thead class="table-light">
+                  <tr>
+                    <th>配置项</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td><code>PG_HOST</code></td><td><code>127.0.0.1</code></td><td>PostgreSQL 数据库主机地址</td></tr>
+                  <tr><td><code>PG_PORT</code></td><td><code>5432</code></td><td>数据库端口</td></tr>
+                  <tr><td><code>PG_DATABASE</code></td><td><code>feishu_meeting</code></td><td>数据库库名 (启动时自动建表)</td></tr>
+                  <tr><td><code>PG_USER</code> / <code>PWD</code></td><td><code>postgres</code> / <code>postgres</code></td><td>数据库账号与密码</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 6. 内网穿透与外网回调 -->
+          <div class="card card-modern p-4 mb-4" id="doc-nat-traversal">
+            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+              <i class="bi bi-globe2 text-danger me-2"></i>6. 本地运行内网穿透与外网 Webhook 回调指引
+            </h5>
+            
+            <p class="small text-muted">如果您是在个人电脑本地开发，钉钉、飞书等公网平台无法直连 <code>127.0.0.1</code>，可使用免费穿透工具将本地 8000 端口映射到公网：</p>
+
+            <div class="bg-dark text-light p-3 rounded small mb-2" style="font-family: monospace;">
+              <div class="text-secondary mb-1"># 方式 1：使用 cpolar 免费穿透 (推荐)</div>
+              <div class="text-success">cpolar http 8000</div>
+              <div class="text-secondary mt-2 mb-1"># 方式 2：使用 ngrok 穿透</div>
+              <div class="text-success">ngrok http 8000</div>
+            </div>
+            <p class="small text-muted mb-0">生成公网 HTTPS 域名（例如 <code>https://3a8b1c.cpolar.top</code>）后，在钉钉/飞书后台将回调 URL 填写为 <code>https://3a8b1c.cpolar.top/api/webhook/dingtalk</code> 即可！</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 历史纪要详情与 Markdown 预览弹窗 -->
+<div class="modal fade" id="historyDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold" id="modal-history-title">会议纪要详情</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-history-doc-banner" class="alert alert-primary d-flex justify-content-between align-items-center py-2 px-3 mb-3 d-none">
+          <div>
+            <i class="bi bi-file-earmark-text-fill text-primary me-2"></i>
+            <span class="fw-semibold">飞书云文档链接：</span>
+            <a href="#" target="_blank" id="modal-history-doc-link" class="text-decoration-underline text-primary">点击打开</a>
+          </div>
+          <button class="btn btn-sm btn-outline-primary" id="modal-history-copy-btn" onclick="copyModalDocUrl()"><i class="bi bi-clipboard me-1"></i>复制链接</button>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-bold text-muted small">💡 会议概览</label>
+          <div class="p-3 bg-light rounded" id="modal-history-overview"></div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-bold text-muted small">🎯 核心决议定案</label>
+          <ul class="list-group" id="modal-history-decisions"></ul>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-bold text-muted small">⚡ 行动清单 (Action Items & Todo)</label>
+          <div id="modal-history-todos"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+        <button type="button" class="btn btn-primary" id="modal-history-load-btn" onclick="loadHistoryToMainWorkspace()"><i class="bi bi-box-arrow-up-right me-1"></i>在工作台打开</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js">
+  // ================= 🌐 显式将所有前端核心函数挂载至 window 全局作用域 (杜绝任何上下文未定义问题) =================
+  window.toggleBotEnabled = toggleBotEnabled;
+  window.openWeChatLoginModal = openWeChatLoginModal;
+  
+  window.logoutWeChat = logoutWeChat;
+  window.loadWeChatQrCode = loadWeChatQrCode;
+  window.checkWeChatInitialStatus = checkWeChatInitialStatus;
+  window.testSingleBot = testSingleBot;
+  window.testAllEnabledBots = testAllEnabledBots;
+  window.testDingTalkStream = testDingTalkStream;
+  window.testQQConnection = testQQConnection;
+  window.saveAllBotChannels = saveAllBotChannels;
+  window.loadBotChannels = loadBotChannels;
+  window.selectAIProvider = selectAIProvider;
+  window.addNewAIProvider = addNewAIProvider;
+  window.deleteCurrentAIProvider = deleteCurrentAIProvider;
+  window.applyCurrentAIAsActive = applyCurrentAIAsActive;
+  window.fetchGatewayModels = fetchGatewayModels;
+  window.renderModelTagsForCurrent = renderModelTagsForCurrent;
+  window.testAIConnection = testAIConnection;
+  window.testFeishuConnection = testFeishuConnection;
+  window.testPGConnection = testPGConnection;
+  window.saveAllConfiguration = saveAllConfiguration;
+  window.startSummarize = startSummarize;
+  window.loadDemoTranscript = loadDemoTranscript;
+  window.createFeishuDoc = createFeishuDoc;
+  window.pushToHardwareCard = pushToHardwareCard;
+  window.broadcastToAllBots = broadcastToAllBots;
+  window.triggerHardwareEvent = triggerHardwareEvent;
+  window.simCardEvent = simCardEvent;
+  window.loadHistoryRecords = loadHistoryRecords;
+  window.filterHistoryRecords = filterHistoryRecords;
+  window.previewHistoryRecord = previewHistoryRecord;
+  window.copyModalDocUrl = copyModalDocUrl;
+  window.copyMarkdown = copyMarkdown;
+  window.copyText = copyText;
+  window.loadHistoryToMainWorkspace = loadHistoryToMainWorkspace;
+  window.pushHistoryRecordToBot = pushHistoryRecordToBot;
+  window.deleteHistoryRecord = deleteHistoryRecord;
+  window.clearAllHistoryRecords = clearAllHistoryRecords;
+  window.handleLogout = handleLogout;
+  window.checkAuthStatus = checkAuthStatus;
+
+</script>
+<script>
+  let currentSummaryData = null;
+  let currentMarkdown = '';
+  let currentDocUrl = '';
+  let fullConfig = {};
+  let currentActiveId = 'deepseek';
+
+  let currentUser = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    checkAuthStatus();
+    loadConfig();
+    loadBotChannels();
+    checkWeChatInitialStatus();
+    initHardwareTwin();
+    updateSimTime();
+    setInterval(updateSimTime, 1000);
+  });
+
+  async function checkAuthStatus() {
+    try {
+      const resp = await fetch('/api/auth/me');
+      const res = await resp.json();
+      if (res.code === 0 && res.user) {
+        currentUser = res.user;
+        const dispName = res.user.display_name || res.user.username;
+        document.getElementById('top-user-name').innerText = `${dispName} (@${res.user.username})`;
+        if (document.getElementById('user-dropdown-fullname')) {
+          document.getElementById('user-dropdown-fullname').innerText = dispName;
+          document.getElementById('user-dropdown-email').innerText = res.user.email || '未绑定邮箱';
+          document.getElementById('user-role-label').innerText = res.user.role === 'admin' ? '👑 系统管理员' : '👤 组织成员';
+        }
+      } else {
+        // Redirect to login if unauthenticated
+        const savedToken = localStorage.getItem('auth_token');
+        if (!savedToken) {
+          window.location.href = '/login';
+        }
+      }
+    } catch (e) {
+      console.warn('检查登录状态失败:', e);
+    }
+  }
+
+  async function handleLogout() {
+    if (!confirm('确定要退出登录吗？')) return;
+    try {
+      await fetch('/api/auth/logout', {method: 'POST'});
+    } catch (e) {}
+    document.cookie = 'session_token=; path=/; max-age=0';
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    window.location.href = '/login';
+  }
+
+  function updateSimTime() {
+    const now = new Date();
+    document.getElementById('sim-time').innerText = now.toTimeString().substring(0, 5);
+  }
+
+  async function loadConfig() {
+    try {
+      const resp = await fetch('/api/config');
+      fullConfig = await resp.json();
+
+      // Feishu
+      if (document.getElementById('cfg-app-id')) document.getElementById('cfg-app-id').value = fullConfig.feishu_app_id || '';
+      if (document.getElementById('cfg-app-secret')) document.getElementById('cfg-app-secret').value = fullConfig.feishu_app_secret || '';
+      if (document.getElementById('cfg-doc-folder')) document.getElementById('cfg-doc-folder').value = fullConfig.feishu_doc_folder_token || '';
+
+      // PostgreSQL
+      if (document.getElementById('cfg-pg-enabled')) {
+        document.getElementById('cfg-pg-enabled').checked = !!fullConfig.pg_enabled;
+        document.getElementById('cfg-pg-host').value = fullConfig.pg_host || '127.0.0.1';
+        document.getElementById('cfg-pg-port').value = fullConfig.pg_port || 5432;
+        document.getElementById('cfg-pg-db').value = fullConfig.pg_database || 'feishu_meeting';
+        document.getElementById('cfg-pg-user').value = fullConfig.pg_user || 'postgres';
+        document.getElementById('cfg-pg-pwd').value = fullConfig.pg_password || '';
+      }
+
+      // Server Network
+      document.getElementById('cfg-web-host').value = fullConfig.web_host || '127.0.0.1';
+      document.getElementById('cfg-web-port').value = fullConfig.web_port || 8000;
+      document.getElementById('cfg-bridge-port').value = fullConfig.bridge_port || 5566;
+      document.getElementById('top-web-port').innerText = fullConfig.web_port || 8000;
+
+      // Active AI Model
+      currentActiveId = fullConfig.active_llm_id || 'deepseek';
+      renderAIProviderPills();
+      selectAIProvider(currentActiveId);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function renderAIProviderPills() {
+    const container = document.getElementById('preset-buttons-container');
+    container.innerHTML = '';
+    const providers = fullConfig.llm_providers || [];
+
+    providers.forEach(p => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isActive = (p.id === currentActiveId);
+      btn.className = `btn btn-sm btn-outline-primary ai-preset-btn ${isActive ? 'active' : ''}`;
+      btn.innerHTML = `${isActive ? '<i class="bi bi-check2-circle me-1"></i>' : ''}${p.name}`;
+      btn.onclick = () => selectAIProvider(p.id);
+      container.appendChild(btn);
+    });
+  }
+
+  function selectAIProvider(providerId) {
+    currentActiveId = providerId;
+    renderAIProviderPills();
+    const providers = fullConfig.llm_providers || [];
+    const p = providers.find(item => item.id === providerId) || providers[0] || {};
+
+    document.getElementById('cur-ai-name').value = p.name || '';
+    document.getElementById('cur-ai-model').value = p.model || '';
+    document.getElementById('cur-ai-base-url').value = p.base_url || '';
+    document.getElementById('cur-ai-key').value = p.api_key || '';
+    document.getElementById('cur-ai-temp').value = (p.temperature !== undefined) ? p.temperature : 0.3;
+    document.getElementById('top-current-model').innerText = p.name || 'DeepSeek';
+    document.getElementById('ai-test-result-badge').innerHTML = '';
+
+    renderModelTags(p);
+  }
+
+  function renderModelTagsForCurrent() {
+    const providers = fullConfig.llm_providers || [];
+    const p = providers.find(item => item.id === currentActiveId) || {};
+    renderModelTags(p);
+  }
+
+  function renderModelTags(provider) {
+    const tagsContainer = document.getElementById('cur-ai-model-tags');
+    if (!tagsContainer) return;
+    tagsContainer.innerHTML = '';
+    const available = provider.available_models || (provider.model ? [provider.model] : []);
+    const currentModelVal = (document.getElementById('cur-ai-model').value || '').trim();
+    
+    available.forEach(m => {
+      const isSelected = (currentModelVal === m);
+      const tag = document.createElement('span');
+      
+      let icon = '⚡';
+      if (m.includes('reasoner') || m.includes('r1') || m.includes('o1') || m.includes('o3') || m.includes('thinking') || m.includes('qwq')) {
+        icon = '🧠';
+      } else if (m.includes('chat') || m.includes('4o') || m.includes('plus') || m.includes('max') || m.includes('latest') || m.includes('sonnet')) {
+        icon = '🔥';
+      }
+
+      tag.className = `badge ${isSelected ? 'bg-primary text-white shadow-sm' : 'bg-light text-secondary border'} text-nowrap user-select-none`;
+      tag.style.cursor = 'pointer';
+      tag.style.fontSize = '12px';
+      tag.style.padding = '5px 9px';
+      tag.style.borderRadius = '6px';
+      tag.innerHTML = `${icon} ${m}`;
+      tag.onclick = () => {
+        document.getElementById('cur-ai-model').value = m;
+        renderModelTags(provider);
+      };
+      tagsContainer.appendChild(tag);
+    });
+  }
+
+  function syncFormBackToCurrentProvider() {
+    const providers = fullConfig.llm_providers || [];
+    let p = providers.find(item => item.id === currentActiveId);
+    if (!p) {
+      p = { id: currentActiveId };
+      providers.push(p);
+    }
+    p.name = document.getElementById('cur-ai-name').value;
+    p.model = document.getElementById('cur-ai-model').value;
+    p.base_url = document.getElementById('cur-ai-base-url').value;
+    p.api_key = document.getElementById('cur-ai-key').value;
+    p.temperature = parseFloat(document.getElementById('cur-ai-temp').value) || 0.3;
+    fullConfig.llm_providers = providers;
+  }
+
+  function addNewAIProvider() {
+    const name = prompt('请输入新 AI 模型显示名称 (例如: Claude-3.5-Sonnet / 智谱 GLM-4 / 本地私有化)：');
+    if (!name) return;
+    const newId = 'custom_' + Date.now();
+    if (!fullConfig.llm_providers) fullConfig.llm_providers = [];
+    fullConfig.llm_providers.push({
+      id: newId,
+      name: name,
+      model: 'gpt-4o',
+      base_url: 'https://api.openai.com/v1',
+      api_key: '',
+      temperature: 0.3
+    });
+    selectAIProvider(newId);
+  }
+
+  function deleteCurrentAIProvider() {
+    if (!confirm('确定要删除当前 AI 模型配置吗？')) return;
+    fullConfig.llm_providers = (fullConfig.llm_providers || []).filter(p => p.id !== currentActiveId);
+    if (fullConfig.llm_providers.length > 0) {
+      selectAIProvider(fullConfig.llm_providers[0].id);
+    } else {
+      addNewAIProvider();
+    }
+  }
+
+  function applyCurrentAIAsActive() {
+    syncFormBackToCurrentProvider();
+    fullConfig.active_llm_id = currentActiveId;
+    const p = (fullConfig.llm_providers || []).find(item => item.id === currentActiveId);
+    if (p) {
+      fullConfig.llm_api_key = p.api_key;
+      fullConfig.llm_base_url = p.base_url;
+      fullConfig.llm_model = p.model;
+      fullConfig.llm_temperature = p.temperature;
+    }
+    renderAIProviderPills();
+    alert(`✔ 已将【${p.name}】设为当前系统激活的 AI 提炼引擎！`);
+  }
+
+  async function testAIConnection() {
+    syncFormBackToCurrentProvider();
+    const key = document.getElementById('cur-ai-key').value.trim();
+    const baseUrl = document.getElementById('cur-ai-base-url').value.trim();
+    const model = document.getElementById('cur-ai-model').value.trim();
+
+    if (!key) {
+      alert('请先在上方填写 API Key！');
+      return;
+    }
+
+    const badge = document.getElementById('ai-test-result-badge');
+    badge.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span> 正在测试 AI 连通性...';
+
+    try {
+      const resp = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          api_key: key,
+          base_url: baseUrl,
+          model: model
+        })
+      });
+      const res = await resp.json();
+      if (res.code === 0) {
+        badge.innerHTML = `<span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>连接成功 (${res.latency_ms}ms) | 响应: "${res.reply}"</span>`;
+      } else {
+        badge.innerHTML = `<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>${res.msg} (${res.latency_ms || 0}ms)</span>`;
+      }
+    } catch (e) {
+      badge.innerHTML = `<span class="badge bg-danger">请求异常: ${e}</span>`;
+    }
+  }
+
+  async function fetchGatewayModels() {
+    syncFormBackToCurrentProvider();
+    const key = document.getElementById('cur-ai-key').value.trim();
+    const baseUrl = document.getElementById('cur-ai-base-url').value.trim();
+
+    if (!key) {
+      alert('请先填写 API Key，再拉取模型列表！');
+      return;
+    }
+
+    const tagsContainer = document.getElementById('cur-ai-model-tags');
+    tagsContainer.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span> <span class="small text-muted">正在从网关拉取模型列表 (/v1/models)...</span>';
+
+    try {
+      const resp = await fetch('/api/ai/fetch_models', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          api_key: key,
+          base_url: baseUrl
+        })
+      });
+      const res = await resp.json();
+      if (res.code === 0 && res.data && res.data.length > 0) {
+        const providers = fullConfig.llm_providers || [];
+        let p = providers.find(item => item.id === currentActiveId);
+        if (p) {
+          p.available_models = res.data;
+          renderModelTags(p);
+        }
+        alert(`🎉 成功从中转网关获取到 ${res.data.length} 款可用模型！\n\n已自动为您列在下方，点击即可切换。`);
+      } else {
+        alert(res.msg || '拉取失败，请检查 Base URL 与 API Key 是否正确');
+        const p = (fullConfig.llm_providers || []).find(item => item.id === currentActiveId) || {};
+        renderModelTags(p);
+      }
+    } catch (e) {
+      alert('从网关拉取异常: ' + e);
+      const p = (fullConfig.llm_providers || []).find(item => item.id === currentActiveId) || {};
+      renderModelTags(p);
+    }
+  }
+
+  async function saveAllConfiguration() {
+    syncFormBackToCurrentProvider();
+    const curP = (fullConfig.llm_providers || []).find(item => item.id === currentActiveId) || {};
+    
+    const payload = {
+      feishu_app_id: document.getElementById('cfg-app-id')?.value || '',
+      feishu_app_secret: document.getElementById('cfg-app-secret')?.value || '',
+      feishu_doc_folder_token: document.getElementById('cfg-doc-folder')?.value || '',
+      // PostgreSQL
+      pg_enabled: document.getElementById('cfg-pg-enabled')?.checked || false,
+      pg_host: document.getElementById('cfg-pg-host')?.value || '127.0.0.1',
+      pg_port: parseInt(document.getElementById('cfg-pg-port')?.value) || 5432,
+      pg_database: document.getElementById('cfg-pg-db')?.value || 'feishu_meeting',
+      pg_user: document.getElementById('cfg-pg-user')?.value || 'postgres',
+      pg_password: document.getElementById('cfg-pg-pwd')?.value || '',
+
+      web_host: document.getElementById('cfg-web-host')?.value || '0.0.0.0',
+      web_port: parseInt(document.getElementById('cfg-web-port')?.value) || 8000,
+      bridge_port: parseInt(document.getElementById('cfg-bridge-port')?.value) || 5566,
+      active_llm_id: currentActiveId,
+      llm_api_key: curP.api_key || '',
+      llm_base_url: curP.base_url || '',
+      llm_model: curP.model || '',
+      llm_temperature: curP.temperature || 0.3,
+      llm_providers: fullConfig.llm_providers,
+      bot_channels: botChannels
+    };
+
+    try {
+      const resp = await fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const res = await resp.json();
+      alert(res.msg || '系统配置保存成功！');
+      document.getElementById('top-current-model').innerText = curP.name || 'DeepSeek';
+      document.getElementById('top-web-port').innerText = payload.web_port;
+    } catch (e) {
+      alert('保存失败: ' + e);
+    }
+  }
+
+  async function testPGConnection() {
+    const badge = document.getElementById('pg-test-badge');
+    badge.className = 'mt-2 small text-primary';
+    badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 正在连接 PostgreSQL 测试...';
+    badge.classList.remove('d-none');
+
+    const payload = {
+      pg_host: document.getElementById('cfg-pg-host')?.value || '127.0.0.1',
+      pg_port: parseInt(document.getElementById('cfg-pg-port')?.value) || 5432,
+      pg_database: document.getElementById('cfg-pg-db')?.value || 'feishu_meeting',
+      pg_user: document.getElementById('cfg-pg-user')?.value || 'postgres',
+      pg_password: document.getElementById('cfg-pg-pwd')?.value || ''
+    };
+
+    try {
+      const resp = await fetch('/api/db/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const res = await resp.json();
+      if (res.code === 0) {
+        badge.className = 'alert alert-success py-1 px-2 mt-2 small mb-0';
+        badge.innerHTML = `<i class="bi bi-check-circle-fill me-1"></i> ${res.msg}`;
+      } else {
+        badge.className = 'alert alert-danger py-1 px-2 mt-2 small mb-0';
+        badge.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i> ${res.msg}`;
+      }
+    } catch (e) {
+      badge.className = 'alert alert-danger py-1 px-2 mt-2 small mb-0';
+      badge.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i> 测试请求异常: ${e}`;
+    }
+  }
+
+  function loadDemoTranscript() {
+    document.getElementById('transcript-input').value = `【会议主持人 李总】（10:00:05）：各位同事早上好，今天我们开会主要讨论两件事：第一是飞书会议妙记自动总结系统的全链路联调进展；第二是 AI Passport 硬件卡片的交互体验与固件适配。首先请研发张工汇报一下飞书开放平台接口的打通情况。
+
+【研发 张工】（10:01:20）：好的李总。我们已完成了飞书自建应用的 Tenant Access Token 自动管理，打通了飞书妙记（Minutes API）元数据拉取，并且实现了两个核心输出通道：一个是飞书群机器人互动卡片，能够在会议结束后 30 秒内将核心决议和待办 Todo 以富文本卡片推送到团队大群；另一个是自动创建飞书云文档（Docx），把完整的会议纪要结构化排版归档。另外我们还预留了飞书多维表格（Bitable）的任务自动同步接口。
+
+【产品 王经理】（10:04:15）：我补充一下大模型提示词部分。我们针对技术评审、PRD 需求会、商务谈判、头脑风暴和通用会议设计了 5 套专用的 Prompt 模板。通过结构化 JSON 输出，能够非常精准地从长语音中剥离出“核心决议（Decisions）”和“责任人待办（Action Items）”。建议我们本周五组织核心业务团队进行首次内测。
+
+【运营 小赵】（10:06:40）：运营这边已经开始撰写用户使用指南。目前来看，一键生成飞书群卡片和云文档的功能非常受欢迎，大家很期待在周五发版后直接在真实会议中使用。我会负责在本周四前输出详细的演示视频和图文教程。
+
+【会议主持人 李总】（10:08:10）：非常好，那我们明确一下本周的行动项：
+1. 研发张工明天下午 18:00 前完成飞书开放平台权限配置与版本发布；
+2. 运营小赵在周四前输出视频教程；
+3. 产品王经理负责周五组织团队内测；
+4. 另外硬件端 AI Passport 卡片的屏幕端摘要显示也要在周五前完成联调测试。`;
+  }
+
+  async function startSummarize(autoDoc = true) {
+    const fileInput = document.getElementById('audio-file-input');
+    const textInput = document.getElementById('transcript-input').value;
+    const scenario = document.getElementById('scenario-select').value;
+    const autoCreateDoc = document.getElementById('auto-create-doc-chk').checked;
+
+    if (!fileInput.files.length && !textInput.trim()) {
+      alert('请粘贴会议文本或上传音频文件！');
+      return;
+    }
+
+    showLoading(true, 'AI 正在深度分析并生成飞书云文档...');
+
+    const autoBroadcast = document.getElementById('auto-broadcast-bot-chk') ? document.getElementById('auto-broadcast-bot-chk').checked : true;
+    const formData = new FormData();
+    formData.append('scenario', scenario);
+    formData.append('auto_create_doc', autoCreateDoc ? 'true' : 'false');
+    formData.append('auto_push_bot', autoBroadcast ? 'true' : 'false');
+    if (fileInput.files.length > 0) {
+      formData.append('audio_file', fileInput.files[0]);
+    }
+    if (textInput.trim()) {
+      formData.append('text', textInput.trim());
+    }
+
+    try {
+      const resp = await fetch('/api/summarize', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await resp.json();
+      showLoading(false);
+
+      if (data.code !== 0) {
+        alert('分析失败: ' + data.msg);
+        return;
+      }
+
+      currentSummaryData = data.data;
+      currentMarkdown = data.markdown || '';
+      currentDocUrl = data.doc_url || '';
+
+      renderSummary(currentSummaryData, currentDocUrl);
+      syncToSimulatorUI(currentSummaryData);
+
+      if (currentDocUrl && currentDocUrl.startsWith('http')) {
+        const banner = document.getElementById('doc-success-banner');
+        banner.classList.remove('d-none');
+        document.getElementById('banner-doc-title').innerText = currentSummaryData.title || '会议纪要';
+        document.getElementById('banner-doc-link').href = currentDocUrl;
+      }
+    } catch (e) {
+      showLoading(false);
+      alert('请求异常: ' + e);
+    }
+  }
+
+  
+
+  function renderSummary(data, docUrl) {
+    document.getElementById('summary-empty-state').classList.add('d-none');
+    document.getElementById('summary-content').classList.remove('d-none');
+
+    document.getElementById('res-title').innerText = data.title || '会议智能纪要';
+    document.getElementById('res-meta').innerText = `${data.date || ''} | 时长: ${data.duration || '25分钟'}`;
+    document.getElementById('res-overview').innerText = data.summary_overview || '';
+
+    const decList = document.getElementById('res-decisions');
+    decList.innerHTML = '';
+    (data.decisions || []).forEach(d => {
+      decList.innerHTML += `<li class="list-group-item px-0 py-1"><span class="badge badge-decision me-2">决议</span><strong>${d}</strong></li>`;
+    });
+
+    const todoTable = document.getElementById('res-todos');
+    todoTable.innerHTML = '';
+    (data.todos || []).forEach(t => {
+      todoTable.innerHTML += `<tr>
+        <td><span class="badge badge-todo">${t.owner || '未指定'}</span></td>
+        <td>${t.task}</td>
+        <td><code>${t.due || '尽快'}</code></td>
+        <td><span class="badge bg-danger">${t.priority || 'P1'}</span></td>
+      </tr>`;
+    });
+
+    const topicContainer = document.getElementById('res-topics');
+    topicContainer.innerHTML = '';
+    (data.topics || []).forEach((top, idx) => {
+      topicContainer.innerHTML += `<div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#topic-${idx}">
+            📌 ${top.name} ${top.speaker ? `(${top.speaker})` : ''}
+          </button>
+        </h2>
+        <div id="topic-${idx}" class="accordion-collapse collapse" data-bs-parent="#res-topics">
+          <div class="accordion-body small text-secondary">${top.summary}</div>
+        </div>
+      </div>`;
+    });
+
+    const followList = document.getElementById('res-followups');
+    followList.innerHTML = '';
+    (data.follow_ups || []).forEach(f => {
+      followList.innerHTML += `<li class="small text-danger mb-1">⚠️ ${f}</li>`;
+    });
+  }
+
+  function syncToSimulatorUI(data) {
+    document.getElementById('sim-badge').className = 'badge bg-success mb-2';
+    document.getElementById('sim-badge').innerText = '【 纪要已生成 】';
+    document.getElementById('sim-title').innerText = data.title || '会议纪要';
+    const firstTodo = (data.todos && data.todos[0]) ? data.todos[0] : null;
+    if (firstTodo) {
+      document.getElementById('sim-line1').innerText = `⚡ [${firstTodo.owner}] ${firstTodo.task.substring(0, 12)}...`;
+      document.getElementById('sim-line2').innerText = `截止: ${firstTodo.due}`;
+      document.getElementById('sim-line3').innerText = `共 ${data.todos.length} 项 Todo 待办`;
+    }
+  }
+
+  
+  async function broadcastToAllBots() {
+    if (!currentSummaryData) {
+      alert('请先生成会议纪要！');
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/bots/broadcast', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          summary_data: currentSummaryData,
+          doc_url: currentDocUrl || ''
+        })
+      });
+      const res = await resp.json();
+
+      if (res.code === 0 && res.data) {
+        const results = res.data;
+        const total = results.length;
+        const successList = results.filter(r => r.success);
+        const failList = results.filter(r => !r.success);
+
+        if (total === 0) {
+          if (confirm('当前未开启任何机器人推送渠道！\n\n是否立即前往【🤖 多机器人推送与渠道鉴权中心】开启渠道？')) {
+            document.querySelector('[data-bs-target="#tab-bots"]').click();
+          }
+          return;
+        }
+
+        let msg = `🎉 多机器人互推广播完成 (共 ${total} 个已开启渠道)：\n\n`;
+        successList.forEach(r => {
+          msg += `✔ 【${r.channel_name}】: 推送成功 (${r.latency_ms || 50}ms)\n`;
+        });
+        if (failList.length > 0) {
+          msg += `\n❌ 失败渠道 (${failList.length} 个)：\n`;
+          failList.forEach(r => {
+            msg += `• 【${r.channel_name}】: ${r.error || '推送异常'}\n`;
+          });
+        }
+
+        alert(msg);
+      } else {
+        alert('广播失败: ' + (res.msg || '未知错误'));
+      }
+    } catch (e) {
+      alert('广播请求异常: ' + e);
+    }
+  }
+
+  async function pushToFeishuBot() {
+    if (!currentSummaryData) {
+      alert('请先生成会议纪要！');
+      return;
+    }
+    try {
+      const resp = await fetch('/api/feishu/push_bot', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(currentSummaryData)
+      });
+      const res = await resp.json();
+      if (res.code === 0) {
+        alert('🎉 成功将《会议智能纪要》富文本卡片推送到飞书群机器人！');
+      } else {
+        alert('推送失败: ' + res.msg);
+      }
+    } catch (e) {
+      alert('网络异常: ' + e);
+    }
+  }
+
+  async function createFeishuDoc() {
+    if (!currentSummaryData) {
+      alert('请先生成会议纪要！');
+      return;
+    }
+    try {
+      const resp = await fetch('/api/feishu/create_doc', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(currentSummaryData)
+      });
+      const res = await resp.json();
+      if (res.code === 0) {
+        currentDocUrl = res.data.doc_url;
+        const banner = document.getElementById('doc-success-banner');
+        banner.classList.remove('d-none');
+        document.getElementById('banner-doc-title').innerText = currentSummaryData.title || '会议纪要';
+        document.getElementById('banner-doc-link').href = currentDocUrl;
+        
+        if (confirm('🎉 飞书云文档创建成功！\n\n是否立即在浏览器新标签页中打开飞书文档？')) {
+          window.open(currentDocUrl, '_blank');
+        }
+      } else {
+        alert('创建失败: ' + res.msg);
+      }
+    } catch (e) {
+      alert('异常: ' + e);
+    }
+  }
+
+  function copyMarkdown() {
+    if (!currentMarkdown) {
+      alert('暂无 Markdown 内容');
+      return;
+    }
+    navigator.clipboard.writeText(currentMarkdown).then(() => {
+      alert('📋 已复制完整飞书 Markdown 纪要到剪贴板，可直接粘贴到任何飞书文档！');
+    }).catch(e => {
+      alert('复制失败: ' + e);
+    });
+  }
+
+  async function pushToHardwareCard() {
+    if (!currentSummaryData) {
+      alert('请先生成会议纪要！');
+      return;
+    }
+    try {
+      const resp = await fetch('/api/card/push', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(currentSummaryData)
+      });
+      const res = await resp.json();
+      alert(res.msg || '已成功同步至 AI Passport 硬件屏幕');
+    } catch (e) {
+      alert('异常: ' + e);
+    }
+  }
+
+  function simCardEvent(eventName) {
+    const logBox = document.getElementById('bridge-logs');
+    const now = new Date().toLocaleTimeString();
+    if (eventName === 'record_start') {
+      logBox.innerText += `\n[${now}] <- 卡片发送: {"event":"record_start"}`;
+      document.getElementById('sim-badge').className = 'badge bg-danger mb-2';
+      document.getElementById('sim-badge').innerText = '【 录音中 REC 】';
+      document.getElementById('sim-line1').innerText = '麦克风采集 16kHz';
+      document.getElementById('sim-line2').innerText = '会议时长: 00:03:25';
+      document.getElementById('sim-line3').innerText = '按 OK 结束并生成纪要';
+    } else if (eventName === 'record_stop') {
+      logBox.innerText += `\n[${now}] <- 卡片发送: {"event":"record_stop","duration":205}`;
+      logBox.innerText += `\n[${now}] -> 触发自动流水线: 1.语音转写 2.AI提炼 3.自动创建飞书云文档 4.自动推送飞书消息`;
+      loadDemoTranscript();
+      startSummarize(true);
+    }
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+    async function testFeishuConnection() {
+    const appId = document.getElementById('bot-input-feishu-app_id')?.value.trim() || document.getElementById('cfg-app-id')?.value.trim();
+    const appSecret = document.getElementById('bot-input-feishu-app_secret')?.value.trim() || document.getElementById('cfg-app-secret')?.value.trim();
+
+    const badge = document.getElementById('bot-badge-feishu');
+    if (badge) {
+      badge.className = 'small text-primary';
+      badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 正在验证 OpenAPI...';
+    }
+
+    try {
+      const resp = await fetch('/api/feishu/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({app_id: appId, app_secret: appSecret})
+      });
+      const res = await resp.json();
+      if (res.code === 0) {
+        alert('🎉 ' + res.msg);
+        if (badge) {
+          badge.className = 'small text-success';
+          badge.innerHTML = '<i class="bi bi-check-circle-fill"></i> OpenAPI 验证成功';
+        }
+      } else {
+        alert('❌ ' + res.msg);
+        if (badge) {
+          badge.className = 'small text-danger';
+          badge.innerHTML = '<i class="bi bi-x-circle-fill"></i> 验证失败';
+        }
+      }
+    } catch (e) {
+      alert('请求异常: ' + e);
+    }
+  }
+
+  function showLoading(show, text) {
+    const spinner = document.getElementById('loading-spinner');
+    const empty = document.getElementById('summary-empty-state');
+    const content = document.getElementById('summary-content');
+    const banner = document.getElementById('doc-success-banner');
+    if (show) {
+      spinner.classList.remove('d-none');
+      empty.classList.add('d-none');
+      content.classList.add('d-none');
+      banner.classList.add('d-none');
+      if (text) document.getElementById('loading-text').innerText = text;
+    } else {
+      spinner.classList.add('d-none');
+    }
+  }
+
+  // ==================== 文档归档与历史记录管理 ====================
+  let cachedHistoryRecords = [];
+  let modalActiveRecord = null;
+
+  async function loadHistoryRecords() {
+    try {
+      const resp = await fetch('/api/history');
+      const res = await resp.json();
+      if (res.code === 0) {
+        cachedHistoryRecords = res.data || [];
+        renderHistoryTable(cachedHistoryRecords);
+        document.getElementById('history-total-count').innerText = `共 ${cachedHistoryRecords.length} 篇文档`;
+      }
+    } catch (e) {
+      console.error('加载历史记录失败:', e);
+    }
+  }
+
+  function renderHistoryTable(records) {
+    const tbody = document.getElementById('history-table-body');
+    const empty = document.getElementById('history-empty-state');
+    const table = document.getElementById('history-table');
+
+    if (!records || records.length === 0) {
+      tbody.innerHTML = '';
+      empty.classList.remove('d-none');
+      table.classList.add('d-none');
+      return;
+    }
+
+    empty.classList.add('d-none');
+    table.classList.remove('d-none');
+
+    let html = '';
+    records.forEach(r => {
+      let sourceBadge = '<span class="badge bg-secondary">网页端</span>';
+      if (r.source === 'card') {
+        sourceBadge = '<span class="badge bg-purple text-white" style="background-color: #8b5cf6;">AI 卡片硬件</span>';
+      } else if (r.source === 'minutes') {
+        sourceBadge = '<span class="badge bg-info text-white">飞书妙记</span>';
+      }
+
+      const hasDoc = (r.doc_url && r.doc_url.startsWith('http'));
+      const docBadge = hasDoc 
+        ? '<span class="badge bg-success-subtle text-success border border-success-subtle ms-2"><i class="bi bi-cloud-check me-1"></i>飞书文档已创建</span>'
+        : '<span class="badge bg-light text-muted border ms-2">本地草稿</span>';
+
+      const decisionsCount = (r.decisions || []).length;
+      const todosCount = (r.todos || []).length;
+
+      html += `
+        <tr>
+          <td>
+            <div class="fw-bold text-dark">${r.title || '会议智能纪要'} ${docBadge}</div>
+            <div class="small text-muted text-truncate" style="max-width: 380px;">${r.summary_overview || '全链路智能总结与行动项梳理'}</div>
+            <div class="small text-secondary mt-1"><i class="bi bi-person me-1"></i>创建人: <span class="fw-semibold text-dark">${r.username || '系统管理员'}</span></div>
+          </td>
+          <td>
+            ${sourceBadge}
+            <div class="small text-muted mt-1">${r.scenario || '通用场景'}</div>
+          </td>
+          <td>
+            <div class="small fw-semibold">${r.created_at || r.date || '-'}</div>
+            <div class="small text-muted">${r.duration || '约25分钟'}</div>
+          </td>
+          <td>
+            <span class="badge bg-warning text-dark me-1">${decisionsCount} 决议</span>
+            <span class="badge bg-primary">${todosCount} 待办</span>
+          </td>
+          <td class="text-end">
+            <div class="btn-group btn-group-sm">
+              ${hasDoc ? `
+                <a href="${r.doc_url}" target="_blank" class="btn btn-primary" title="打开飞书文档">
+                  <i class="bi bi-box-arrow-up-right me-1"></i>打开文档
+                </a>
+                <button class="btn btn-outline-secondary" onclick="copyText('${r.doc_url}')" title="复制文档链接">
+                  <i class="bi bi-link-45deg"></i>
+                </button>
+              ` : ''}
+              <button class="btn btn-outline-info" onclick="previewHistoryRecord('${r.id}')" title="查看详情">
+                <i class="bi bi-eye"></i>
+              </button>
+              <button class="btn btn-outline-secondary" onclick="pushHistoryRecordToBot('${r.id}')" title="重新推送到飞书群">
+                <i class="bi bi-send"></i>
+              </button>
+              <button class="btn btn-outline-danger" onclick="deleteHistoryRecord('${r.id}')" title="删除记录">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+
+    tbody.innerHTML = html;
+  }
+
+  function filterHistoryRecords() {
+    const q = (document.getElementById('history-search-input').value || '').trim().toLowerCase();
+    if (!q) {
+      renderHistoryTable(cachedHistoryRecords);
+      return;
+    }
+    const filtered = cachedHistoryRecords.filter(r => {
+      const title = (r.title || '').toLowerCase();
+      const overview = (r.summary_overview || '').toLowerCase();
+      const date = (r.created_at || r.date || '').toLowerCase();
+      const decs = (r.decisions || []).join(' ').toLowerCase();
+      const todos = (r.todos || []).map(t => (t.task || '') + ' ' + (t.owner || '')).join(' ').toLowerCase();
+      return title.includes(q) || overview.includes(q) || date.includes(q) || decs.includes(q) || todos.includes(q);
+    });
+    renderHistoryTable(filtered);
+  }
+
+  function previewHistoryRecord(recordId) {
+    const rec = cachedHistoryRecords.find(r => r.id === recordId);
+    if (!rec) return;
+    modalActiveRecord = rec;
+
+    document.getElementById('modal-history-title').innerText = rec.title || '会议纪要详情';
+    document.getElementById('modal-history-overview').innerText = rec.summary_overview || '暂无概览描述';
+
+    const decUl = document.getElementById('modal-history-decisions');
+    decUl.innerHTML = '';
+    (rec.decisions || []).forEach(d => {
+      const li = document.createElement('li');
+      li.className = 'list-group-item list-group-item-light small';
+      li.innerHTML = `<i class="bi bi-check-circle-fill text-success me-2"></i><strong>${d}</strong>`;
+      decUl.appendChild(li);
+    });
+    if ((rec.decisions || []).length === 0) {
+      decUl.innerHTML = '<li class="list-group-item text-muted small">本次会议无特定决议定案</li>';
+    }
+
+    const todoBox = document.getElementById('modal-history-todos');
+    todoBox.innerHTML = '';
+    (rec.todos || []).forEach(t => {
+      const div = document.createElement('div');
+      div.className = 'p-2 bg-light border rounded mb-2 d-flex justify-content-between align-items-center small';
+      div.innerHTML = `
+        <div>
+          <span class="badge bg-warning text-dark me-2">${t.owner || '未指定'}</span>
+          <span>${t.task || ''}</span>
+        </div>
+        <div>
+          <span class="badge bg-secondary me-2">截止: ${t.due || '尽快'}</span>
+          <span class="badge bg-danger">${t.priority || 'P1'}</span>
+        </div>
+      `;
+      todoBox.appendChild(div);
+    });
+    if ((rec.todos || []).length === 0) {
+      todoBox.innerHTML = '<div class="text-muted small">本次会议无待办事项</div>';
+    }
+
+    const banner = document.getElementById('modal-history-doc-banner');
+    if (rec.doc_url && rec.doc_url.startsWith('http')) {
+      banner.classList.remove('d-none');
+      document.getElementById('modal-history-doc-link').href = rec.doc_url;
+      document.getElementById('modal-history-doc-link').innerText = rec.doc_url;
+    } else {
+      banner.classList.add('d-none');
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('historyDetailModal'));
+    modal.show();
+  }
+
+  function copyModalDocUrl() {
+    if (modalActiveRecord && modalActiveRecord.doc_url) {
+      copyText(modalActiveRecord.doc_url);
+    }
+  }
+
+  function copyText(str) {
+    if (!str) return;
+    navigator.clipboard.writeText(str).then(() => {
+      alert('📋 飞书文档链接已复制到剪贴板！');
+    }).catch(e => {
+      prompt('请手动复制链接:', str);
+    });
+  }
+
+  function loadHistoryToMainWorkspace() {
+    if (!modalActiveRecord) return;
+    currentSummaryData = modalActiveRecord.raw_data || modalActiveRecord;
+    currentDocUrl = modalActiveRecord.doc_url || '';
+    
+    // Switch to Tab 1
+    const tab1Btn = document.querySelector('button[data-bs-target="#tab-audio"]');
+    if (tab1Btn) {
+      bootstrap.Tab.getInstance(tab1Btn)?.show() || new bootstrap.Tab(tab1Btn).show();
+    }
+    renderSummaryResult(currentSummaryData, currentDocUrl);
+    bootstrap.Modal.getInstance(document.getElementById('historyDetailModal'))?.hide();
+  }
+
+  async function pushHistoryRecordToBot(recordId) {
+    const rec = cachedHistoryRecords.find(r => r.id === recordId);
+    if (!rec) return;
+    try {
+      const resp = await fetch('/api/feishu/push_bot', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(rec.raw_data || rec)
+      });
+      const res = await resp.json();
+      alert(res.msg);
+    } catch (e) {
+      alert('推送异常: ' + e);
+    }
+  }
+
+  async function deleteHistoryRecord(recordId) {
+    if (!confirm('确定要删除此条会议纪要归档记录吗？')) return;
+    try {
+      const resp = await fetch('/api/history/' + recordId, {method: 'DELETE'});
+      const res = await resp.json();
+      loadHistoryRecords();
+    } catch (e) {
+      alert('删除失败: ' + e);
+    }
+  }
+
+  async function clearAllHistoryRecords() {
+    if (!confirm('⚠️ 警告：确定要清空所有已归档的会议纪要与文档记录吗？此操作不可逆！')) return;
+    try {
+      const resp = await fetch('/api/history/clear', {method: 'POST'});
+      const res = await resp.json();
+      loadHistoryRecords();
+      alert('历史归档已清空');
+    } catch (e) {
+      alert('清空异常: ' + e);
+    }
+  }
+
+  // ================= 🤖 多机器人推送渠道前端逻辑 =================
+  let botChannels = [];
+
+  const DEFAULT_FRONTEND_BOT_CHANNELS = [
+    {id: "wechat_clawbot", name: "微信 ClawBot", type: "wechat_clawbot", enabled: false, icon: "bi-wechat", color: "success", description: "基于 sillyGirl 微信 ClawBot/iLink/GeWe 协议，支持微信扫码登录、好友与群聊双向互动"},
+    {id: "feishu", name: "飞书群机器人", type: "feishu", enabled: true, icon: "bi-feather", color: "primary", description: "飞书群自定义机器人 Webhook 与签名校验 (支持富文本互动卡片)"},
+    {id: "wecom", name: "企业微信群机器人", type: "wecom", enabled: false, icon: "bi-chat-dots-fill", color: "success", description: "企业微信群 Webhook 机器人与自建应用消息推送"},
+    {id: "dingtalk", name: "钉钉群机器人", type: "dingtalk", enabled: false, icon: "bi-send-fill", color: "info", description: "钉钉自定义机器人，支持 HmacSHA256 签名加签鉴权"},
+    {id: "telegram", name: "Telegram Bot", type: "telegram", enabled: false, icon: "bi-telegram", color: "primary", description: "Telegram 官方 Bot API 消息推送"},
+    {id: "onebot", name: "QQ / OneBot (v11)", type: "onebot", enabled: false, icon: "bi-tencent-qq", color: "danger", description: "基于 OneBot 标准协议的 QQ 群/私聊机器人 (NapCat / Go-CQHTTP)"},
+    {id: "pushdeer", name: "PushDeer (无界推送)", type: "pushdeer", enabled: false, icon: "bi-send-check-fill", color: "primary", description: "轻量开源无界推送服务，支持客户端与微信免装 App 接收"},
+    {id: "pushplus", name: "PushPlus (微信推送)", type: "pushplus", enabled: false, icon: "bi-wechat", color: "success", description: "微信公众号一对多模板消息免建 App 极速推送"},
+    {id: "serverchan", name: "Server酱 (微信/Turbo)", type: "serverchan", enabled: false, icon: "bi-bell-fill", color: "warning", description: "方糖气球 Server酱 Turbo 消息通道"},
+    {id: "bark", name: "Bark (iOS 实时通知)", type: "bark", enabled: false, icon: "bi-apple", color: "dark", description: "苹果 iOS 设备原生极速弹窗通知 (带云文档跳转 URL)"},
+    {id: "discord", name: "Discord 机器人", type: "discord", enabled: false, icon: "bi-discord", color: "primary", description: "Discord 频道 Webhook Embed 结构化会议纪要直推"},
+    {id: "custom", name: "自定义 Webhook", type: "custom", enabled: false, icon: "bi-code-slash", color: "secondary", description: "通用标准 HTTP POST JSON 开放接口"}
+  ];
+
+    
+    function toggleBotEnabled(chId, isEnabled) {
+    if (!botChannels || botChannels.length === 0) {
+      botChannels = JSON.parse(JSON.stringify(DEFAULT_FRONTEND_BOT_CHANNELS));
+    }
+    let ch = botChannels.find(c => c.id === chId);
+    if (!ch) {
+      ch = { id: chId, enabled: isEnabled };
+      botChannels.push(ch);
+    } else {
+      ch.enabled = isEnabled;
+    }
+    const badge = document.getElementById(`bot-badge-${chId}`);
+    if (badge) {
+      badge.className = isEnabled ? 'small text-success' : 'small text-muted';
+      badge.innerHTML = isEnabled ? '<i class="bi bi-check-circle-fill"></i> 已启用' : '未开启';
+    }
+  }
+
+  // ================= 📱 微信 ClawBot 扫码登录与状态轮询 JS =================
+  let wechatStatusTimer = null;
+
+  async function testQQConnection() {
+    const apiUrl = document.getElementById('bot-input-onebot-http_api_url')?.value.trim() || 'http://127.0.0.1:3000';
+    const token = document.getElementById('bot-input-onebot-access_token')?.value.trim();
+
+    const badge = document.getElementById('bot-badge-onebot');
+    if (badge) {
+      badge.className = 'small text-danger';
+      badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 正在测试 OneBot 连接...';
+    }
+
+    try {
+      const resp = await fetch('/api/onebot/test_connection', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({http_api_url: apiUrl, access_token: token})
+      });
+      const res = await resp.json();
+
+      if (res.code === 0) {
+        alert('🎉 ' + res.msg);
+        if (badge) {
+          badge.className = 'small text-success';
+          badge.innerHTML = '<i class="bi bi-check-circle-fill"></i> QQ 已连接';
+        }
+      } else {
+        alert('❌ OneBot 连接测试失败: ' + res.msg);
+        if (badge) {
+          badge.className = 'small text-danger';
+          badge.innerHTML = '<i class="bi bi-x-circle-fill"></i> 未连接';
+        }
+      }
+    } catch (e) {
+      alert('请求异常: ' + e);
+    }
+  }
+
+  async function testDingTalkStream() {
+    const clientId = document.getElementById('bot-input-dingtalk-client_id')?.value.trim();
+    const clientSecret = document.getElementById('bot-input-dingtalk-client_secret')?.value.trim();
+
+    if (!clientId || !clientSecret) {
+      alert('请先填写钉钉应用的 Client ID 和 Client Secret！');
+      return;
+    }
+
+    const badge = document.getElementById('bot-badge-dingtalk');
+    if (badge) {
+      badge.className = 'small text-info';
+      badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 正在连接钉钉 Stream 网关...';
+    }
+
+    try {
+      const resp = await fetch('/api/dingtalk/test_stream', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({client_id: clientId, client_secret: clientSecret})
+      });
+      const res = await resp.json();
+
+      if (res.code === 0) {
+        alert('🎉 ' + res.msg);
+        if (badge) {
+          badge.className = 'small text-success';
+          badge.innerHTML = '<i class="bi bi-check-circle-fill"></i> Stream 已连接';
+        }
+      } else {
+        alert('❌ 钉钉 Stream 测试失败: ' + res.msg);
+        if (badge) {
+          badge.className = 'small text-danger';
+          badge.innerHTML = '<i class="bi bi-x-circle-fill"></i> 认证失败';
+        }
+      }
+    } catch (e) {
+      alert('请求异常: ' + e);
+    }
+  }
+
+  function openWeChatLoginModal() {
+    console.log('🚀 正在打开微信扫码登录视窗...');
+    const modalEl = document.getElementById('wechatLoginModal');
+    if (!modalEl) {
+      alert('未找到微信登录弹窗组件，请刷新页面！');
+      return;
+    }
+    try {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    } catch (e) {
+      console.warn('Bootstrap 弹窗初始化降级:', e);
+      modalEl.classList.add('show');
+      modalEl.style.display = 'block';
+      document.body.classList.add('modal-open');
+    }
+    checkWeChatInitialStatus();
+  }
+
+  async function checkWeChatInitialStatus() {
+    try {
+      const resp = await fetch('/api/clawbot/status');
+      const res = await resp.json();
+      if (res.state === 'LOGGED_IN') {
+        renderWeChatLoggedInUI(res);
+      } else {
+        loadWeChatQrCode();
+      }
+    } catch (e) {
+      loadWeChatQrCode();
+    }
+  }
+
+  async function loadWeChatQrCode() {
+    const overlay = document.getElementById('wechat-qr-overlay');
+    const qrImg = document.getElementById('wechat-qr-img');
+    const statusText = document.getElementById('wechat-status-text');
+    const accCard = document.getElementById('wechat-account-card');
+    const logoutBtn = document.getElementById('btn-wechat-logout');
+
+    accCard?.classList.add('d-none');
+    logoutBtn?.classList.add('d-none');
+    overlay?.classList.remove('d-none');
+
+    const apiUrl = document.getElementById('bot-input-wechat_clawbot-base_api_url')?.value || '';
+    const token = document.getElementById('bot-input-wechat_clawbot-token')?.value || '';
+
+    try {
+      const resp = await fetch(`/api/clawbot/qrcode?api_url=${encodeURIComponent(apiUrl)}&token=${encodeURIComponent(token)}`);
+      const res = await resp.json();
+      overlay?.classList.add('d-none');
+
+      if (res.code === 0 && res.qr_b64) {
+        const src = (res.qr_b64.startsWith('data:') || res.qr_b64.startsWith('http')) 
+          ? res.qr_b64 
+          : 'data:image/png;base64,' + res.qr_b64;
+        qrImg.src = src;
+        statusText.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-qr-code me-1"></i>请使用手机微信扫描二维码</span>';
+        startWeChatStatusPolling();
+      } else {
+        const errDetail = res.msg || '获取二维码失败';
+        statusText.innerHTML = `<div class="alert alert-danger py-2 px-2 text-start small mb-0" style="font-size: 11px;">
+          <i class="bi bi-exclamation-triangle-fill text-danger me-1"></i><strong>网关未连通</strong>: ${errDetail}
+        </div>`;
+      }
+    } catch (e) {
+      overlay?.classList.add('d-none');
+      statusText.innerHTML = `<div class="alert alert-danger py-2 px-2 text-start small mb-0" style="font-size: 11px;">
+        <i class="bi bi-x-circle-fill text-danger me-1"></i><strong>网络请求异常</strong>: ${e}
+      </div>`;
+    }
+  }
+
+  function startWeChatStatusPolling() {
+    if (wechatStatusTimer) clearInterval(wechatStatusTimer);
+    wechatStatusTimer = setInterval(async () => {
+      try {
+        const resp = await fetch('/api/clawbot/status');
+        const res = await resp.json();
+        const statusText = document.getElementById('wechat-status-text');
+
+        if (res.state === 'SCANNED') {
+          statusText.innerHTML = '<span class="text-success fw-bold">✔ 已扫码成功！</span> 请在手机微信上点击【确认登录】';
+        } else if (res.state === 'LOGGED_IN') {
+          clearInterval(wechatStatusTimer);
+          renderWeChatLoggedInUI(res);
+        } else if (res.state === 'EXPIRED') {
+          clearInterval(wechatStatusTimer);
+          statusText.innerHTML = '<span class="text-danger">二维码已过期</span>，请点击下方刷新';
+        }
+      } catch (e) {}
+    }, 2000);
+  }
+
+  function renderWeChatLoggedInUI(data) {
+    const accCard = document.getElementById('wechat-account-card');
+    const logoutBtn = document.getElementById('btn-wechat-logout');
+    const statusBox = document.getElementById('wechat-login-status-box');
+    const qrImg = document.getElementById('wechat-qr-img');
+
+    // Update Modal
+    accCard?.classList.remove('d-none');
+    logoutBtn?.classList.remove('d-none');
+    statusBox?.classList.add('d-none');
+    if (qrImg) qrImg.src = 'https://raw.githubusercontent.com/smallfawn/sillyGirl/master/logo.png';
+
+    if (document.getElementById('modal-wechat-name')) document.getElementById('modal-wechat-name').innerText = data.nickname || '微信用户';
+    if (document.getElementById('modal-wechat-wxid')) document.getElementById('modal-wechat-wxid').innerText = data.wxid || '已登录';
+    if (document.getElementById('modal-wechat-avatar')) document.getElementById('modal-wechat-avatar').src = data.avatar_url || 'https://raw.githubusercontent.com/smallfawn/sillyGirl/master/logo.png';
+
+    // Update Card in Tab 4
+    if (document.getElementById('wechat-user-nickname')) document.getElementById('wechat-user-nickname').innerText = data.nickname || '微信助手';
+    if (document.getElementById('wechat-user-wxid')) document.getElementById('wechat-user-wxid').innerText = data.wxid || '在线就绪';
+    if (document.getElementById('wechat-avatar') && data.avatar_url) document.getElementById('wechat-avatar').src = data.avatar_url;
+
+    const enabledChk = document.getElementById('bot-enabled-wechat_clawbot');
+    if (enabledChk) {
+      enabledChk.checked = true;
+      toggleBotEnabled('wechat_clawbot', true);
+    }
+  }
+
+  
+
+  async function logoutWeChat() {
+    if (!confirm('确定要断开微信连接并退出登录吗？')) return;
+    try {
+      await fetch('/api/clawbot/logout', {method: 'POST'});
+      if (document.getElementById('wechat-user-nickname')) document.getElementById('wechat-user-nickname').innerText = '未登录微信';
+      if (document.getElementById('wechat-user-wxid')) document.getElementById('wechat-user-wxid').innerText = '点击右侧按钮扫码';
+      const enabledChk = document.getElementById('bot-enabled-wechat_clawbot');
+      if (enabledChk) {
+        enabledChk.checked = false;
+        toggleBotEnabled('wechat_clawbot', false);
+      }
+      loadWeChatQrCode();
+    } catch (e) {
+      alert('退出异常: ' + e);
+    }
+  }
+
+    const BOT_ALL_KEYS = [
+    'webhook_url', 'target_wxid', 'base_api_url', 'client_id', 'client_secret', 'debug_log',
+    'secret', 'at_all', 'mentioned_list', 'mentioned_mobile_list', 'corp_id', 'agent_id',
+    'at_mobiles', 'is_at_all', 'bot_token', 'chat_id', 'api_base', 'proxy_url', 'http_api_url',
+    'target_type', 'target_id', 'master_id', 'app_id', 'app_secret', 'folder_token', 'access_token',
+    'token', 'topic', 'channel', 'sendkey', 'pushkey', 'endpoint', 'device_key', 'server_url',
+    'group', 'sound', 'level', 'username', 'avatar_url', 'http_method', 'auth_header'
+  ];
+
+  async function loadBotChannels() {
+    if (!botChannels || botChannels.length === 0) {
+      botChannels = JSON.parse(JSON.stringify(DEFAULT_FRONTEND_BOT_CHANNELS));
+    }
+
+    try {
+      const resp = await fetch('/api/bots');
+      const res = await resp.json();
+      if (res.code === 0 && res.data && res.data.length > 0) {
+        botChannels = res.data;
+      }
+    } catch (e) {
+      console.warn('后端获取机器人渠道失败:', e);
+    }
+
+    // 填充静态预置卡片的值
+    botChannels.forEach(ch => {
+      const chId = ch.id;
+      const enabledChk = document.getElementById(`bot-enabled-${chId}`);
+      if (enabledChk) {
+        enabledChk.checked = !!ch.enabled;
+        const badge = document.getElementById(`bot-badge-${chId}`);
+        if (badge) {
+          badge.className = ch.enabled ? 'small text-success' : 'small text-muted';
+          badge.innerHTML = ch.enabled ? '<i class="bi bi-check-circle-fill"></i> 已启用' : '未开启';
+        }
+      }
+
+      BOT_ALL_KEYS.forEach(key => {
+        const el = document.getElementById(`bot-input-${chId}-${key}`);
+        if (el && ch[key] !== undefined) {
+          if (el.type === 'checkbox') {
+            el.checked = !!ch[key];
+          } else {
+            el.value = ch[key] || '';
+          }
+        }
+      });
+    });
+  }
+
+  function syncFormBackToBotChannels() {
+    botChannels.forEach(ch => {
+      const enabledChk = document.getElementById(`bot-enabled-${ch.id}`);
+      if (enabledChk) ch.enabled = enabledChk.checked;
+
+      BOT_ALL_KEYS.forEach(k => {
+        const el = document.getElementById(`bot-input-${ch.id}-${k}`);
+        if (el) {
+          if (el.type === 'checkbox') {
+            ch[k] = el.checked;
+          } else {
+            ch[k] = el.value.trim();
+          }
+        }
+      });
+    });
+  }
+
+  async function testSingleBot(chId) {
+    syncFormBackToBotChannels();
+    const ch = botChannels.find(c => c.id === chId);
+    if (!ch) return;
+
+    const badge = document.getElementById(`bot-badge-${chId}`);
+    if (badge) {
+      badge.className = 'small text-primary';
+      badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 正在测试发送...';
+    }
+
+    try {
+      const resp = await fetch('/api/bots/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({channel: ch})
+      });
+      const res = await resp.json();
+
+      if (res.code === 0 && res.data && res.data.code === 0) {
+        alert(`🎉 【${ch.name}】连通性测试成功！
+
+已成功向该渠道发送测试卡片通知。`);
+        if (badge) {
+          badge.className = 'small text-success';
+          badge.innerHTML = '<i class="bi bi-check-circle-fill"></i> 测试成功';
+        }
+      } else {
+        const err = (res.data && res.data.msg) || res.msg || '未知错误';
+        alert(`❌ 【${ch.name}】推送测试失败: 
+
+${err}`);
+        if (badge) {
+          badge.className = 'small text-danger';
+          badge.innerHTML = '<i class="bi bi-x-circle-fill"></i> 测试失败';
+        }
+      }
+    } catch (e) {
+      alert('请求异常: ' + e);
+      if (badge) {
+        badge.className = 'small text-danger';
+        badge.innerHTML = '<i class="bi bi-x-circle-fill"></i> 异常';
+      }
+    }
+  }
+
+  async function saveAllBotChannels() {
+    syncFormBackToBotChannels();
+    try {
+      // 1. 保存所有机器人渠道
+      const resp = await fetch('/api/bots', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({channels: botChannels})
+      });
+      const res = await resp.json();
+
+      // 2. 同时将飞书开放平台凭证自动同步至系统核心配置
+      const feishuCh = botChannels.find(c => c.id === 'feishu');
+      if (feishuCh && (feishuCh.app_id || feishuCh.app_secret)) {
+        await fetch('/api/config', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            feishu_app_id: feishuCh.app_id || '',
+            feishu_app_secret: feishuCh.app_secret || '',
+            feishu_doc_folder_token: feishuCh.folder_token || ''
+          })
+        });
+      }
+
+      alert('🎉 ' + (res.msg || '所有机器人渠道与飞书开放平台配置保存成功！'));
+    } catch (e) {
+      alert('保存失败: ' + e);
+    }
+  }
+
+  async function testAllEnabledBots() {
+    syncFormBackToBotChannels();
+    const enabled = botChannels.filter(c => c.enabled);
+    if (enabled.length === 0) {
+      alert('当前没有开启任何机器人推送渠道，请先在下方开启至少一个渠道！');
+      return;
+    }
+    if (!confirm(`即将向已启用的 ${enabled.length} 个机器人渠道发送广播测试消息，确定继续吗？`)) return;
+
+    for (const ch of enabled) {
+      testSingleBot(ch.id);
+    }
+  }
+
+
+  // ================= 🎴 AI Passport 硬件屏幕实时孪生前端同步逻辑 =================
+  let hardwarePollingTimer = null;
+  let currentCardState = 'IDLE';
+
+  function initHardwareTwin() {
+    pollCardScreenState();
+    if (!hardwarePollingTimer) {
+      hardwarePollingTimer = setInterval(pollCardScreenState, 1500);
+    }
+  }
+
+  async function pollCardScreenState() {
+    try {
+      const resp = await fetch('/api/card/status');
+      const res = await resp.json();
+      if (res.code === 0 && res.data) {
+        updateDigitalTwinDisplay(res.data);
+      }
+    } catch (e) {}
+  }
+
+  function updateDigitalTwinDisplay(data) {
+    currentCardState = data.state || 'DISCONNECTED';
+    const badgeEl = document.getElementById('twin-screen-badge');
+    const titleEl = document.getElementById('twin-screen-title');
+    const dynamicArea = document.getElementById('twin-screen-dynamic-area');
+    const clientCountEl = document.getElementById('twin-hw-client-count');
+    const statusBadge = document.getElementById('twin-hw-status-badge');
+    const connStatusEl = document.getElementById('twin-screen-conn-status');
+    const batEl = document.getElementById('twin-screen-battery');
+
+    const isConnected = !!data.is_connected;
+
+    if (clientCountEl) {
+      clientCountEl.innerText = `在线设备: ${data.connected_count || 0} 台`;
+    }
+
+    if (!isConnected) {
+      if (batEl) batEl.innerHTML = '<i class="bi bi-battery me-1 text-secondary"></i>未连接';
+      if (statusBadge) {
+        statusBadge.className = 'badge bg-secondary ms-2';
+        statusBadge.innerHTML = '<i class="bi bi-dash-circle me-1"></i>未连接 (端口 5566 待命)';
+      }
+      if (connStatusEl) {
+        connStatusEl.className = 'text-danger';
+        connStatusEl.innerText = '● 未连接';
+      }
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-secondary mb-2';
+        badgeEl.innerText = '【 🔴 设备未连接 】';
+      }
+      if (titleEl) titleEl.innerText = '等待物理胸卡接入';
+      if (dynamicArea) {
+        dynamicArea.innerHTML = `
+          <p class="mb-1 text-danger">● 暂无实体硬件接入</p>
+          <p class="mb-1 text-muted">● 端口: TCP 0.0.0.0:5566</p>
+          <p class="mb-0 text-muted">● 连接后显示实时屏幕</p>
+        `;
+      }
+      return;
+    }
+
+    // ========== 真实设备已连接状态 ==========
+    if (batEl) {
+      batEl.innerHTML = `<i class="bi bi-battery-charging text-success me-1"></i>${data.battery_soc || 100}%`;
+    }
+    if (statusBadge) {
+      statusBadge.className = 'badge bg-success text-white ms-2';
+      statusBadge.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>实体卡片已连接';
+    }
+    if (connStatusEl) {
+      connStatusEl.className = 'text-success';
+      connStatusEl.innerText = '● 实体卡片在线';
+    }
+
+    if (data.state === 'RECORDING') {
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-danger animate-pulse mb-2';
+        badgeEl.innerText = '【 🎙️ 录音中... 】';
+      }
+      if (titleEl) titleEl.innerText = '正在录制会议原声';
+      const sec = data.record_duration || 0;
+      const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+      const ss = String(sec % 60).padStart(2, '0');
+      if (dynamicArea) {
+        dynamicArea.innerHTML = `
+          <div class="text-center py-1">
+            <span class="fs-5 fw-bold text-danger">${mm}:${ss}</span>
+            <div class="text-warning mt-1" style="font-size: 10px;">波形采样中 |||l||l|||l|</div>
+            <p class="text-white small mt-1 mb-0" style="font-size: 10px;">再次单击 OK 结束录音</p>
+          </div>
+        `;
+      }
+    } else if (data.state === 'PROCESSING') {
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-warning text-dark mb-2';
+        badgeEl.innerText = '【 ⚡ AI 提炼中 】';
+      }
+      if (titleEl) titleEl.innerText = '大模型智能总结中';
+      if (dynamicArea) {
+        dynamicArea.innerHTML = `
+          <div class="text-center py-2">
+            <div class="spinner-border spinner-border-sm text-warning mb-1"></div>
+            <div class="text-light small" style="font-size: 10px;">提取决议与待办...</div>
+          </div>
+        `;
+      }
+    } else if (data.current_summary) {
+      const sum = data.current_summary;
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-success mb-2';
+        badgeEl.innerText = '【 ✔ 纪要已就绪 】';
+      }
+      if (titleEl) titleEl.innerText = sum.title || '会议智能纪要';
+      
+      const todos = sum.todos || [];
+      const curIdx = data.current_todo_index || 0;
+      const curTodo = todos[curIdx];
+
+      let todoHtml = '<p class="mb-0 text-muted">暂无待办事项</p>';
+      if (curTodo) {
+        todoHtml = `
+          <div class="p-1 rounded bg-secondary bg-opacity-25 mb-1" style="font-size: 10px;">
+            <span class="text-warning fw-bold">[${curTodo.priority || 'P1'}]</span> ${curTodo.task || ''}
+            <div class="text-info mt-1">👤 ${curTodo.owner || '待定'} | ⏳ ${curTodo.due || '本周'}</div>
+          </div>
+          <div class="text-center text-muted" style="font-size: 9px;">Todo: ${curIdx + 1} / ${todos.length} (UP/DOWN翻页)</div>
+        `;
+      }
+
+      if (dynamicArea) {
+        dynamicArea.innerHTML = todoHtml;
+      }
+    } else {
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-primary mb-2';
+        badgeEl.innerText = '【 🟢 待命就绪 】';
+      }
+      if (titleEl) titleEl.innerText = 'AI Passport 智能胸卡';
+      if (dynamicArea) {
+        dynamicArea.innerHTML = `
+          <p class="mb-1 text-info" id="twin-line-1">● 单击 OK: 开始录音</p>
+          <p class="mb-1 text-info" id="twin-line-2">● 再次 OK: 结束并总结</p>
+          <p class="mb-0 text-muted" id="twin-line-3">● UP/DOWN: 查看 Todo</p>
+        `;
+      }
+    }
+  }
+
+  async function triggerHardwareEvent(eventName) {
+    const logBox = document.getElementById('twin-bridge-logs');
+    const now = new Date().toLocaleTimeString();
+
+    try {
+      const resp = await fetch('/api/card/event', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event: eventName})
+      });
+      const res = await resp.json();
+
+      if (logBox) {
+        if (res.code === 0) {
+          logBox.innerText += `\n[${now}] -> 下发硬件指令: {"cmd":"${eventName}"} (状态: 成功)`;
+        } else {
+          logBox.innerText += `\n[${now}] !! 硬件连接提示: ${res.msg}`;
+        }
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+
+      if (res.code === 0 && res.data) {
+        updateDigitalTwinDisplay(res.data);
+      } else if (res.code !== 0) {
+        alert(res.msg || '硬件指令发送失败，请确认 ESP32-C3 胸卡是否已接入端口 5566！');
+      }
+    } catch (e) {
+      if (logBox) {
+        logBox.innerText += `\n[${now}] !! 请求异常: ${e}`;
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+      alert('硬件指令请求异常: ' + e);
+    }
+  }
+
+
+  // ================= 🌐 显式将所有前端核心函数挂载至 window 全局作用域 (杜绝任何上下文未定义问题) =================
+  window.toggleBotEnabled = toggleBotEnabled;
+  window.openWeChatLoginModal = openWeChatLoginModal;
+  
+  window.logoutWeChat = logoutWeChat;
+  window.loadWeChatQrCode = loadWeChatQrCode;
+  window.checkWeChatInitialStatus = checkWeChatInitialStatus;
+  window.testSingleBot = testSingleBot;
+  window.testAllEnabledBots = testAllEnabledBots;
+  window.testDingTalkStream = testDingTalkStream;
+  window.testQQConnection = testQQConnection;
+  window.saveAllBotChannels = saveAllBotChannels;
+  window.loadBotChannels = loadBotChannels;
+  window.selectAIProvider = selectAIProvider;
+  window.addNewAIProvider = addNewAIProvider;
+  window.deleteCurrentAIProvider = deleteCurrentAIProvider;
+  window.applyCurrentAIAsActive = applyCurrentAIAsActive;
+  window.fetchGatewayModels = fetchGatewayModels;
+  window.renderModelTagsForCurrent = renderModelTagsForCurrent;
+  window.testAIConnection = testAIConnection;
+  window.testFeishuConnection = testFeishuConnection;
+  window.testPGConnection = testPGConnection;
+  window.saveAllConfiguration = saveAllConfiguration;
+  window.startSummarize = startSummarize;
+  window.loadDemoTranscript = loadDemoTranscript;
+  window.createFeishuDoc = createFeishuDoc;
+  window.pushToHardwareCard = pushToHardwareCard;
+  window.broadcastToAllBots = broadcastToAllBots;
+  window.triggerHardwareEvent = triggerHardwareEvent;
+  window.simCardEvent = simCardEvent;
+  window.loadHistoryRecords = loadHistoryRecords;
+  window.filterHistoryRecords = filterHistoryRecords;
+  window.previewHistoryRecord = previewHistoryRecord;
+  window.copyModalDocUrl = copyModalDocUrl;
+  window.copyMarkdown = copyMarkdown;
+  window.copyText = copyText;
+  window.loadHistoryToMainWorkspace = loadHistoryToMainWorkspace;
+  window.pushHistoryRecordToBot = pushHistoryRecordToBot;
+  window.deleteHistoryRecord = deleteHistoryRecord;
+  window.clearAllHistoryRecords = clearAllHistoryRecords;
+  window.handleLogout = handleLogout;
+  window.checkAuthStatus = checkAuthStatus;
+
+</script>
+
+<!-- 📱 微信 ClawBot 扫码登录与状态管理弹窗 -->
+<div class="modal fade" id="wechatLoginModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width: 400px;">
+    <div class="modal-content border-0 shadow-lg" style="border-radius: 16px; overflow: hidden;">
+      <div class="modal-header bg-success text-white py-3">
+        <h6 class="modal-title fw-bold"><i class="bi bi-wechat me-2"></i>微信 ClawBot 扫码授权登录</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center p-4">
+        <!-- 二维码视窗 -->
+        <div class="position-relative d-inline-block p-2 bg-white rounded border mb-3 shadow-sm" style="width: 220px; height: 220px;">
+          <img id="wechat-qr-img" src="" class="img-fluid rounded" style="width: 100%; height: 100%; object-fit: contain;">
+          <div id="wechat-qr-overlay" class="position-absolute top-0 start-0 w-100 h-100 bg-white bg-opacity-75 d-flex flex-column align-items-center justify-content-center d-none rounded">
+            <span class="spinner-border text-success mb-2"></span>
+            <span class="small fw-bold text-success" id="wechat-overlay-text">正在生成二维码...</span>
+          </div>
+        </div>
+
+        <div id="wechat-login-status-box" class="alert alert-light border py-2 px-3 small mb-3">
+          <span class="spinner-grow spinner-grow-sm text-success me-1"></span>
+          <span id="wechat-status-text">请使用手机微信扫描上方二维码</span>
+        </div>
+
+        <!-- 当前已登录账户信息卡 -->
+        <div id="wechat-account-card" class="p-3 border rounded bg-light mb-3 text-start d-none">
+          <div class="d-flex align-items-center mb-2">
+            <img id="modal-wechat-avatar" src="" class="rounded-circle me-2 border" style="width: 44px; height: 44px;">
+            <div>
+              <div class="fw-bold" id="modal-wechat-name">微信用户</div>
+              <div class="text-muted small" id="modal-wechat-wxid">wxid_xxxx</div>
+            </div>
+          </div>
+          <div class="badge bg-success w-100 py-2"><i class="bi bi-check-circle-fill me-1"></i>微信登录状态正常 (已挂载)</div>
+        </div>
+
+        <div class="d-flex justify-content-center gap-2">
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadWeChatQrCode()"><i class="bi bi-arrow-repeat me-1"></i>刷新二维码</button>
+          
+          <button class="btn btn-sm btn-outline-danger d-none" id="btn-wechat-logout" onclick="logoutWeChat()"><i class="bi bi-power me-1"></i>退出登录</button>
+        </div>
+
+        <!-- 微信网关启动与排查指引 (可折叠) -->
+        <div class="accordion mt-3" id="wechatHelpAccordion">
+          <div class="accordion-item border-0 bg-light rounded">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed py-2 px-3 small text-muted bg-transparent shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#wechatHelpCollapse" style="font-size: 12px;">
+                <i class="bi bi-question-circle text-primary me-1"></i> 提示网关未连通？查看启动指南 ▾
+              </button>
+            </h2>
+            <div id="wechatHelpCollapse" class="accordion-collapse collapse" data-bs-parent="#wechatHelpAccordion">
+              <div class="accordion-body text-start p-3 pt-0" style="font-size: 11px; line-height: 1.5; color: #555;">
+                <div class="fw-bold text-dark mb-1">📌 为什么提示无法连接 2531 端口？</div>
+                <div>本系统坚持 100% 真实协议直连，不使用假数据。此提示说明您本地或服务器尚未启动 GeWeChat / ClawBot 微信服务容器。</div>
+                <div class="fw-bold text-dark mt-2 mb-1">🚀 启动方式 1：本地 Docker 一键运行</div>
+                <div class="bg-dark text-success p-2 rounded small font-monospace" style="font-size: 10px;">
+                  docker run -d --name gewechat -p 2531:2531 -p 2532:2532 registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest
+                </div>
+                <div class="fw-bold text-dark mt-2 mb-1">🌐 启动方式 2：修改为远程服务器地址</div>
+                <div>若您的 GeWeChat 部署在云服务器，请在微信卡片中将 <code>http://127.0.0.1:2531</code> 修改为您的远程服务器 IP。</div>
+                <div class="fw-bold text-dark mt-2 mb-1">✨ 免部署推荐：</div>
+                <div>如果暂未部署微信服务，可直接使用 <strong>飞书、钉钉 (Stream免公网)、企业微信、QQ、Bark、PushDeer</strong> 等 11 大零门槛渠道！</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer bg-light py-2 text-center d-block border-top-0">
+        <span class="text-muted" style="font-size: 11px;">sillyGirl 微信协议栈 · 毫秒级双向消息同步</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
