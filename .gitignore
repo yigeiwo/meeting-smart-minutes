@@ -39,17 +39,16 @@ htmlcov/
 .env
 !.env.example
 
-# Logs & temporary records
+# Local Records & Storage
+records/
 *.log
-records/*.wav
-records/*.mp3
-records/*.m4a
 
 # OS Files
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Cloned third-party subrepos
+# Subdirectories / packaging copies
+feishu-meeting-ai-suite/
 ai-passport/
 ai-passport-simulator/
