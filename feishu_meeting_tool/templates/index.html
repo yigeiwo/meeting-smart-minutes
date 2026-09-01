@@ -162,6 +162,7 @@
                   <select class="form-select form-select-sm" id="card-mode-selector" style="width: auto; font-size: 12px;" onchange="selectCardMode(this.value)">
                     <option value="menu">🎛️ 功能选择主菜单 (Menu)</option>
                     <option value="meeting" selected>📋 智能会议纪要 (Meeting)</option>
+                    <option value="bluetooth_audio">🎵 蓝牙音频播放 (BT Audio)</option>
                     <option value="nfc">🔑 NFC 智能门禁 (NFC Access)</option>
                     <option value="todo">🎯 每日待办打卡 (Todo)</option>
                     <option value="pomodoro">⏳ 专注番茄时钟 (Pomodoro)</option>
@@ -190,10 +191,13 @@
                   <i class="bi bi-stop-circle-fill me-1"></i>⏹️ 结束录音
                 </button>
                 <button class="btn btn-outline-warning text-dark btn-sm fw-bold" type="button" onclick="triggerHardwareEvent('nfc_swipe')">
-                  <i class="bi bi-broadcast-pin text-danger me-1"></i>🔑 NFC 刷卡开门
+                  <i class="bi bi-broadcast-pin text-danger me-1"></i>🔑 刷卡开门
                 </button>
                 <button class="btn btn-outline-info text-dark btn-sm" type="button" onclick="openNfcModal()">
                   <i class="bi bi-credit-card-2-front-fill me-1"></i>门禁卡包
+                </button>
+                <button class="btn btn-outline-danger text-dark btn-sm fw-bold" type="button" onclick="openBtAudioModal()" title="蓝牙播放声音与会议播报">
+                  <i class="bi bi-music-note-beamed text-danger me-1"></i>🎵 蓝牙音箱/播报
                 </button>
                 <button class="btn btn-primary btn-sm ms-auto" type="button" onclick="pushToHardwareCard()">
                   <i class="bi bi-send-fill me-1"></i>推送到胸卡
@@ -1726,6 +1730,12 @@
   window.toggleBotEnabled = toggleBotEnabled;
   window.selectCardMode = selectCardMode;
   window.openNfcModal = openNfcModal;
+  window.openBtAudioModal = openBtAudioModal;
+  window.toggleAudioPlay = toggleAudioPlay;
+  window.nextAudioTrack = nextAudioTrack;
+  window.prevAudioTrack = prevAudioTrack;
+  window.updateAudioVolume = updateAudioVolume;
+  window.speakCurrentMeetingSummary = speakCurrentMeetingSummary;
   window.addNewNfcCard = addNewNfcCard;
   window.deleteNfcCard = deleteNfcCard;
   window.selectNfcCardByIndex = selectNfcCardByIndex;
@@ -3327,6 +3337,12 @@ ${err}`);
   window.toggleBotEnabled = toggleBotEnabled;
   window.selectCardMode = selectCardMode;
   window.openNfcModal = openNfcModal;
+  window.openBtAudioModal = openBtAudioModal;
+  window.toggleAudioPlay = toggleAudioPlay;
+  window.nextAudioTrack = nextAudioTrack;
+  window.prevAudioTrack = prevAudioTrack;
+  window.updateAudioVolume = updateAudioVolume;
+  window.speakCurrentMeetingSummary = speakCurrentMeetingSummary;
   window.addNewNfcCard = addNewNfcCard;
   window.deleteNfcCard = deleteNfcCard;
   window.selectNfcCardByIndex = selectNfcCardByIndex;
@@ -3503,6 +3519,80 @@ ${err}`);
                 </div>
                 <button class="btn btn-success btn-sm w-100 fw-bold" type="button" onclick="addNewNfcCard()">
                   <i class="bi bi-check-lg me-1"></i>保存并同步至卡片
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer bg-light border-0 px-4 py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 🎵 蓝牙音频播放与语音播报控制弹窗 -->
+  <div class="modal fade" id="btAudioModal" tabindex="-1" aria-labelledby="btAudioModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-danger bg-opacity-10 border-0 px-4 py-3">
+          <h5 class="modal-title fw-bold text-dark" id="btAudioModalLabel">
+            <i class="bi bi-soundwave text-danger me-2"></i>🎵 AI Passport 蓝牙音频播放与会议语音播报
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-4">
+          <div class="alert alert-warning small d-flex align-items-center mb-4">
+            <i class="bi bi-bluetooth fs-4 me-3 text-primary"></i>
+            <div>
+              AI Passport 搭载 <strong>ES8311 I2S 全双工高清编解码器</strong> 与 <strong>NS4150 Class-D 扬声器功放</strong>，
+              支持作为随身蓝牙音箱播放手机/电脑音乐、会议纪要 AI 语音自动播报、灵感便签回放与番茄钟专注白噪音！
+            </div>
+          </div>
+
+          <div class="row g-4 align-items-center">
+            <!-- 左侧: 播放器黑胶界面 -->
+            <div class="col-md-5 text-center">
+              <div class="p-4 bg-dark rounded-4 text-white shadow" style="background: linear-gradient(145deg, #1e293b, #0f172a);">
+                <div class="display-4 text-danger mb-2">
+                  <i class="bi bi-disc" id="bt-modal-disc-icon"></i>
+                </div>
+                <h6 class="fw-bold mb-1 text-truncate" id="bt-modal-track-title">会议核心决议与待办播报</h6>
+                <div class="small text-muted mb-3" id="bt-modal-artist">AI 智能语音合成引擎</div>
+                
+                <div class="d-flex justify-content-center align-items-center gap-3">
+                  <button class="btn btn-outline-light btn-sm rounded-circle p-2" type="button" onclick="prevAudioTrack()" title="上一首">
+                    <i class="bi bi-skip-start-fill fs-5"></i>
+                  </button>
+                  <button class="btn btn-danger rounded-circle p-3 shadow" type="button" onclick="toggleAudioPlay()" id="bt-modal-play-btn" title="播放/暂停">
+                    <i class="bi bi-play-fill fs-3" id="bt-modal-play-icon"></i>
+                  </button>
+                  <button class="btn btn-outline-light btn-sm rounded-circle p-2" type="button" onclick="nextAudioTrack()" title="下一首">
+                    <i class="bi bi-skip-end-fill fs-5"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 右侧: 音量调节、曲目选择与一键播报 -->
+            <div class="col-md-7">
+              <div class="card p-3 bg-light border-0 rounded-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <label class="form-label small fw-bold mb-0 text-dark">
+                    <i class="bi bi-volume-up-fill text-primary me-1"></i>硬件扬声器音量: <span id="bt-modal-volume-val">75%</span>
+                  </label>
+                  <span class="badge bg-success small"><i class="bi bi-check-circle me-1"></i>蓝牙已连通</span>
+                </div>
+                <input type="range" class="form-range" id="bt-modal-volume-range" min="0" max="100" value="75" oninput="updateAudioVolume(this.value)">
+              </div>
+
+              <div class="d-grid gap-2">
+                <button class="btn btn-primary btn-sm fw-bold py-2" type="button" onclick="speakCurrentMeetingSummary()">
+                  <i class="bi bi-megaphone-fill me-1"></i>📢 一键通过蓝牙播报当前《会议智能纪要》
+                </button>
+                <button class="btn btn-outline-dark btn-sm py-2" type="button" onclick="selectCardMode('bluetooth_audio'); bootstrap.Modal.getInstance(document.getElementById('btAudioModal')).hide();">
+                  <i class="bi bi-display me-1"></i>切换胸卡屏幕至【蓝牙音频播放器】模式
                 </button>
               </div>
             </div>

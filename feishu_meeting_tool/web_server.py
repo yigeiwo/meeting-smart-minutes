@@ -634,6 +634,60 @@ async def select_nfc_card_api(body: dict):
     return {"code": -1, "msg": "无效的卡片序号"}
 
 
+@app.get("/api/audio/status")
+async def get_audio_status():
+    cb = get_card_bridge()
+    return {
+        "code": 0,
+        "data": {
+            "is_playing": cb.bt_is_playing,
+            "volume": cb.bt_volume,
+            "connected_device": cb.bt_connected_device,
+            "current_track": cb.bt_playlist[cb.bt_track_index % len(cb.bt_playlist)],
+            "track_index": cb.bt_track_index,
+            "playlist": cb.bt_playlist,
+            "playback_seconds": cb.bt_playback_seconds,
+        }
+    }
+
+
+@app.post("/api/audio/toggle")
+async def toggle_audio_play():
+    cb = get_card_bridge()
+    cb.toggle_bt_audio()
+    return {"code": 0, "msg": "音频状态已切换", "data": cb.get_screen_state()}
+
+
+@app.post("/api/audio/next")
+async def next_audio_track():
+    cb = get_card_bridge()
+    cb.next_bt_track()
+    return {"code": 0, "msg": "已切换下一首", "data": cb.get_screen_state()}
+
+
+@app.post("/api/audio/prev")
+async def prev_audio_track():
+    cb = get_card_bridge()
+    cb.prev_bt_track()
+    return {"code": 0, "msg": "已切换上一首", "data": cb.get_screen_state()}
+
+
+@app.post("/api/audio/volume")
+async def set_audio_volume_api(body: dict):
+    vol = int(body.get("volume", 75))
+    cb = get_card_bridge()
+    cb.set_bt_volume(vol)
+    return {"code": 0, "msg": f"音量已设置为 {vol}%", "data": cb.get_screen_state()}
+
+
+@app.post("/api/audio/speak_summary")
+async def speak_summary_audio_api(body: dict):
+    title = body.get("title")
+    cb = get_card_bridge()
+    cb.speak_summary_tts(title)
+    return {"code": 0, "msg": "已通过蓝牙/卡片扬声器开始语音播报会议纪要", "data": cb.get_screen_state()}
+
+
 @app.post("/api/card/push")
 async def push_to_card(summary_data: dict):
     get_card_bridge().push_meeting_summary_to_card(summary_data)

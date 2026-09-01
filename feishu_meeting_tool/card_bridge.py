@@ -30,7 +30,7 @@ def get_font(size: int = 14) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-# ================= 🎴 AI Passport 核心功能模式定义 (含 NFC 门禁) =================
+# ================= 🎴 AI Passport 核心功能模式定义 (含 NFC 门禁与蓝牙音频) =================
 CARD_MODES = [
     {
         "id": "meeting",
@@ -39,6 +39,14 @@ CARD_MODES = [
         "desc": "高清录音/AI总结/Todo与云文档",
         "badge": "MEETING",
         "color": (59, 130, 246),
+    },
+    {
+        "id": "bluetooth_audio",
+        "name": "蓝牙音频播放",
+        "icon": "🎵",
+        "desc": "随身蓝牙音箱/会议语音播报/切歌",
+        "badge": "BT AUDIO",
+        "color": (236, 72, 153),
     },
     {
         "id": "nfc",
@@ -101,7 +109,7 @@ class CardBridge:
         self.is_running = False
 
         # Mode & State Machine
-        # States: "MENU", "IDLE", "RECORDING", "PROCESSING", "SUMMARIZED", "NFC", "TODO", "POMODORO", "MEMO", "ASSISTANT", "STATUS"
+        # States: "MENU", "IDLE", "RECORDING", "PROCESSING", "SUMMARIZED", "BT_AUDIO", "NFC", "TODO", "POMODORO", "MEMO", "ASSISTANT", "STATUS"
         self.current_mode = "meeting"
         self.state = "IDLE"
         self.menu_selected_index = 0
@@ -113,6 +121,20 @@ class CardBridge:
         self.current_summary: Optional[Dict[str, Any]] = None
         self.current_todo_index = 0
         self._timer_thread: Optional[threading.Thread] = None
+
+        # ================= 🎵 蓝牙音频播放系统数据 =================
+        self.bt_connected_device = "手机蓝牙 / 蓝牙耳机"
+        self.bt_is_playing = False
+        self.bt_volume = 75
+        self.bt_playlist = [
+            {"title": "会议核心决议与待办语音播报", "artist": "AI 妙记语音引擎", "duration": 145, "type": "tts"},
+            {"title": "专注工作 Lo-Fi 节奏白噪音", "artist": "Cyber Chill 01", "duration": 210, "type": "music"},
+            {"title": "晨会灵感速记与待办清单", "artist": "Voice Memo TTS", "duration": 95, "type": "memo"},
+            {"title": "深度冥想与休息白噪音", "artist": "Deep Focus", "duration": 300, "type": "ambient"},
+        ]
+        self.bt_track_index = 0
+        self.bt_playback_seconds = 42
+        self._bt_timer_thread: Optional[threading.Thread] = None
 
         # ================= 🔑 NFC 智能门禁卡包数据 =================
         self.nfc_cards = [
@@ -248,6 +270,9 @@ class CardBridge:
             elif msg_type in ["nfc_swipe", "swipe"]:
                 self.trigger_nfc_swipe()
 
+            elif msg_type in ["bt_play", "bt_pause", "bt_toggle"]:
+                self.toggle_bt_audio()
+
             elif msg_type == "record_start":
                 self._start_recording()
             elif msg_type == "record_stop":
@@ -285,6 +310,9 @@ class CardBridge:
 
         if mode_id == "meeting":
             self.state = "SUMMARIZED" if self.current_summary else "IDLE"
+        elif mode_id in ["bluetooth_audio", "audio", "bt_audio"]:
+            self.current_mode = "bluetooth_audio"
+            self.state = "BT_AUDIO"
         elif mode_id == "nfc":
             self.state = "NFC"
         elif mode_id == "todo":
@@ -304,9 +332,76 @@ class CardBridge:
         self.render_and_send_frame()
         self.broadcast({
             "event": "mode_entered",
-            "mode_id": mode_id,
+            "mode_id": self.current_mode,
             "state": self.state,
         })
+
+    # ================= 🎵 蓝牙音频播放控制方法 =================
+
+    def toggle_bt_audio(self):
+        """播放 / 暂停 切换"""
+        self.bt_is_playing = not self.bt_is_playing
+        logger.info(f"🎵 蓝牙音频状态切换: {'播放中' if self.bt_is_playing else '已暂停'}")
+        if self.bt_is_playing:
+            if not self._bt_timer_thread or not self._bt_timer_thread.is_alive():
+                self._bt_timer_thread = threading.Thread(target=self._bt_playback_loop, daemon=True)
+                self._bt_timer_thread.start()
+        self.render_and_send_frame()
+        self.broadcast({
+            "event": "bt_audio_state",
+            "is_playing": self.bt_is_playing,
+            "track": self.bt_playlist[self.bt_track_index % len(self.bt_playlist)],
+            "volume": self.bt_volume,
+        })
+
+    def next_bt_track(self):
+        """切换下一首"""
+        self.bt_track_index = (self.bt_track_index + 1) % len(self.bt_playlist)
+        self.bt_playback_seconds = 0
+        logger.info(f"🎵 切换下一首: {self.bt_playlist[self.bt_track_index]['title']}")
+        self.render_and_send_frame()
+
+    def prev_bt_track(self):
+        """切换上一首"""
+        self.bt_track_index = (self.bt_track_index - 1) % len(self.bt_playlist)
+        self.bt_playback_seconds = 0
+        logger.info(f"🎵 切换上一首: {self.bt_playlist[self.bt_track_index]['title']}")
+        self.render_and_send_frame()
+
+    def set_bt_volume(self, vol: int):
+        """设置音量 (0-100)"""
+        self.bt_volume = max(0, min(100, vol))
+        self.render_and_send_frame()
+
+    def speak_summary_tts(self, custom_title: str = None):
+        """将当前会议纪要通过蓝牙播报"""
+        title = custom_title or (self.current_summary.get("title") if self.current_summary else "会议纪要核心决议")
+        self.bt_playlist[0] = {
+            "title": f"【播报】{title[:14]}",
+            "artist": "AI 语音合成播报",
+            "duration": 120,
+            "type": "tts"
+        }
+        self.bt_track_index = 0
+        self.bt_playback_seconds = 0
+        self.bt_is_playing = True
+        self.enter_mode("bluetooth_audio")
+        if not self._bt_timer_thread or not self._bt_timer_thread.is_alive():
+            self._bt_timer_thread = threading.Thread(target=self._bt_playback_loop, daemon=True)
+            self._bt_timer_thread.start()
+
+    def _bt_playback_loop(self):
+        while self.is_running and self.bt_is_playing and self.state == "BT_AUDIO":
+            time.sleep(1.0)
+            if self.bt_is_playing and self.state == "BT_AUDIO":
+                cur_dur = self.bt_playlist[self.bt_track_index % len(self.bt_playlist)]["duration"]
+                if self.bt_playback_seconds < cur_dur:
+                    self.bt_playback_seconds += 1
+                    self.render_and_send_frame()
+                else:
+                    self.next_bt_track()
+
+    # ================= 🔑 NFC 门禁控制方法 =================
 
     def trigger_nfc_swipe(self):
         """触发 NFC 门禁模拟刷卡通行"""
@@ -370,7 +465,17 @@ class CardBridge:
             self.enter_menu()
             return
 
-        # 模式 1: NFC 智能门禁模式 (NFC)
+        # 模式 1: 蓝牙音频播放 (BT_AUDIO)
+        if self.current_mode == "bluetooth_audio" or self.state == "BT_AUDIO":
+            if btn_name in ["OK", "KEY_OK", "key_ok"]:
+                self.toggle_bt_audio()
+            elif btn_name in ["UP", "KEY_UP", "key_up"]:
+                self.prev_bt_track()
+            elif btn_name in ["DOWN", "KEY_DOWN", "key_down"]:
+                self.next_bt_track()
+            return
+
+        # 模式 2: NFC 智能门禁模式 (NFC)
         if self.current_mode == "nfc" or self.state == "NFC":
             if btn_name in ["UP", "KEY_UP", "key_up"]:
                 if self.nfc_cards:
@@ -384,7 +489,7 @@ class CardBridge:
                 self.trigger_nfc_swipe()
             return
 
-        # 模式 2: 智能会议模式 (Meeting)
+        # 模式 3: 智能会议模式 (Meeting)
         if self.current_mode == "meeting" or self.state in ["IDLE", "RECORDING", "PROCESSING", "SUMMARIZED"]:
             if btn_name == "OK":
                 if self.state in ["IDLE", "SUMMARIZED"]:
@@ -401,7 +506,7 @@ class CardBridge:
                     self.current_todo_index = min(max_idx, self.current_todo_index + 1)
                     self.render_and_send_frame()
 
-        # 模式 3: 每日待办打卡 (Todo)
+        # 模式 4: 每日待办打卡 (Todo)
         elif self.current_mode == "todo" or self.state == "TODO":
             if btn_name == "UP":
                 self.todo_selected_index = max(0, self.todo_selected_index - 1)
@@ -414,7 +519,7 @@ class CardBridge:
                     self.daily_todos[self.todo_selected_index]["done"] = not self.daily_todos[self.todo_selected_index]["done"]
                     self.render_and_send_frame()
 
-        # 模式 4: 专注番茄钟 (Pomodoro)
+        # 模式 5: 专注番茄钟 (Pomodoro)
         elif self.current_mode == "pomodoro" or self.state == "POMODORO":
             if btn_name == "OK":
                 self.pomo_is_running = not self.pomo_is_running
@@ -431,13 +536,13 @@ class CardBridge:
                 self.pomo_remaining_seconds = self.pomo_duration_total
                 self.render_and_send_frame()
 
-        # 模式 5: 语音灵感速记 (Memo)
+        # 模式 6: 语音灵感速记 (Memo)
         elif self.current_mode == "memo" or self.state == "MEMO":
             if btn_name == "OK":
                 self.memos_count += 1
                 self.render_and_send_frame()
 
-        # 模式 6: 状态诊断 (Status)
+        # 模式 7: 状态诊断 (Status)
         elif self.current_mode == "status" or self.state == "STATUS":
             if btn_name in ["UP", "DOWN", "OK"]:
                 self.render_and_send_frame()
@@ -595,54 +700,95 @@ class CardBridge:
 
         # ================= 🎛️ 1. 功能选择主菜单 (MENU 状态) =================
         if self.state == "MENU":
-            draw.rounded_rectangle([(40, 32), (200, 56)], radius=6, fill=(59, 130, 246))
-            draw.text((58, 36), "【 功能选择菜单 】", fill=(255, 255, 255), font=font_md)
+            draw.rounded_rectangle([(40, 30), (200, 52)], radius=6, fill=(59, 130, 246))
+            draw.text((58, 34), "【 功能选择菜单 】", fill=(255, 255, 255), font=font_md)
 
             # 菜单选项卡片列表 (上下按键翻阅，当前项高亮)
-            start_y = 62
+            start_y = 56
             for idx, mode in enumerate(CARD_MODES):
-                y = start_y + idx * 32
+                y = start_y + idx * 28
                 is_selected = (idx == self.menu_selected_index)
 
                 if is_selected:
-                    draw.rounded_rectangle([(10, y), (230, y + 28)], radius=5, fill=(30, 58, 138), outline=(56, 189, 248), width=2)
-                    draw.text((16, y + 5), f"▶ {mode['icon']} {mode['name']}", fill=(255, 255, 255), font=font_md)
-                    draw.text((165, y + 7), mode['badge'], fill=(125, 211, 252), font=get_font(9))
+                    draw.rounded_rectangle([(10, y), (230, y + 25)], radius=4, fill=(30, 58, 138), outline=(56, 189, 248), width=2)
+                    draw.text((14, y + 4), f"▶ {mode['icon']} {mode['name']}", fill=(255, 255, 255), font=get_font(13))
+                    draw.text((168, y + 6), mode['badge'], fill=(125, 211, 252), font=get_font(8))
                 else:
-                    draw.rounded_rectangle([(10, y), (230, y + 28)], radius=5, fill=(30, 41, 59), outline=(51, 65, 85))
-                    draw.text((18, y + 5), f"{mode['icon']} {mode['name']}", fill=(203, 213, 225), font=font_md)
-                    draw.text((165, y + 7), mode['badge'], fill=(100, 116, 139), font=get_font(9))
+                    draw.rounded_rectangle([(10, y), (230, y + 25)], radius=4, fill=(30, 41, 59), outline=(51, 65, 85))
+                    draw.text((16, y + 4), f"{mode['icon']} {mode['name']}", fill=(203, 213, 225), font=get_font(13))
+                    draw.text((168, y + 6), mode['badge'], fill=(100, 116, 139), font=get_font(8))
 
             # 底部按键提示
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((18, 296), "▲/▼:选择  OK:进入  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🔑 2. NFC 智能门禁模式 (NFC 状态) =================
+        # ================= 🎵 2. 蓝牙音频播放器 (BT_AUDIO 状态) =================
+        elif self.state == "BT_AUDIO":
+            draw.rounded_rectangle([(42, 32), (198, 56)], radius=6, fill=(236, 72, 153))
+            draw.text((58, 36), "🎵 蓝牙音频播放器", fill=(255, 255, 255), font=font_md)
+
+            # 蓝牙连接状态与设备
+            draw.text((22, 66), f"🟢 已连接: {self.bt_connected_device}", fill=(52, 211, 153), font=get_font(11))
+
+            # 黑胶 / 卡带播放视窗
+            draw.rounded_rectangle([(14, 85), (226, 205)], radius=10, fill=(30, 41, 59), outline=(244, 114, 182), width=1)
+
+            cur_track = self.bt_playlist[self.bt_track_index % len(self.bt_playlist)]
+            draw.text((24, 95), cur_track.get("title", "未知曲目")[:14], fill=(255, 255, 255), font=font_md)
+            draw.text((24, 120), f"艺术家: {cur_track.get('artist', 'AI 语音')}", fill=(250, 204, 21), font=font_sm)
+
+            # 进度条
+            cur_sec = self.bt_playback_seconds
+            total_sec = max(1, cur_track.get("duration", 180))
+            cur_m, cur_s = divmod(cur_sec, 60)
+            tot_m, tot_s = divmod(total_sec, 60)
+            time_str = f"{cur_m:02d}:{cur_s:02d} / {tot_m:02d}:{tot_s:02d}"
+            draw.text((24, 145), time_str, fill=(148, 163, 184), font=get_font(11))
+
+            progress = min(1.0, cur_sec / total_sec)
+            draw.rectangle([(24, 165), (216, 173)], fill=(15, 23, 42), outline=(71, 85, 105))
+            fill_w = int(24 + progress * 192)
+            draw.rectangle([(24, 165), (fill_w, 173)], fill=(236, 72, 153))
+
+            # 状态与音量
+            play_badge = "▶ 正在播放 (Playing)" if self.bt_is_playing else "⏸️ 已暂停 (Paused)"
+            play_color = (74, 222, 128) if self.bt_is_playing else (251, 146, 60)
+            draw.text((24, 184), play_badge, fill=play_color, font=get_font(11))
+            draw.text((150, 184), f"🔊 音量 {self.bt_volume}%", fill=(125, 211, 252), font=get_font(11))
+
+            # 频谱柱动效
+            draw.rectangle([(14, 215), (226, 275)], fill=(15, 23, 42), outline=(51, 65, 85))
+            draw.text((22, 225), "ES8311 I2S 全双工立体声输出", fill=(203, 213, 225), font=get_font(11))
+            # 模拟律动条
+            for bar_i in range(10):
+                bx = 24 + bar_i * 19
+                bh = (15 + (bar_i * 7) % 25) if self.bt_is_playing else 5
+                draw.rectangle([(bx, 268 - bh), (bx + 12, 268)], fill=(236, 72, 153) if self.bt_is_playing else (71, 85, 105))
+
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((8, 296), "OK:启停  ▲/▼:切歌  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 🔑 3. NFC 智能门禁模式 (NFC 状态) =================
         elif self.state == "NFC":
             draw.rounded_rectangle([(42, 32), (198, 56)], radius=6, fill=(249, 115, 22))
             draw.text((58, 36), "🔑 NFC 智能门禁通行", fill=(255, 255, 255), font=font_md)
 
             if self.nfc_cards:
                 cur_card = self.nfc_cards[self.nfc_selected_index % len(self.nfc_cards)]
-                
-                # 拟真门禁卡片芯片面板
                 card_bg = (67, 56, 202) if not self.nfc_swiping else (16, 185, 129)
                 border_color = (129, 140, 248) if not self.nfc_swiping else (74, 222, 128)
                 draw.rounded_rectangle([(12, 64), (228, 215)], radius=12, fill=card_bg, outline=border_color, width=2)
 
-                # 芯片线圈与标题
                 draw.text((22, 74), "((( NFC ACCESS PASS )))", fill=(253, 224, 71), font=get_font(11))
                 draw.text((22, 94), cur_card.get("name", "智能门禁卡")[:13], fill=(255, 255, 255), font=font_md)
                 draw.text((22, 120), f"协议: {cur_card.get('type', 'ISO14443-A')}", fill=(226, 232, 240), font=font_sm)
 
-                # UID 芯片编号高亮展示
                 draw.rectangle([(20, 145), (220, 180)], fill=(15, 23, 42), outline=(250, 204, 21))
                 draw.text((26, 150), "卡片 UID (Chip ID):", fill=(148, 163, 184), font=get_font(10))
                 draw.text((26, 162), cur_card.get("uid", "8A:3F:12:C9"), fill=(56, 189, 248), font=font_md)
 
                 draw.text((22, 190), f"卡包序号: [{self.nfc_selected_index + 1}/{len(self.nfc_cards)}]", fill=(203, 213, 225), font=get_font(11))
 
-                # 刷卡动画或就绪提示
                 if self.nfc_swiping:
                     draw.rectangle([(16, 224), (224, 275)], fill=(16, 185, 129), outline=(74, 222, 128))
                     draw.text((32, 234), "🟢 刷卡成功！门禁已解锁", fill=(255, 255, 255), font=font_md)
@@ -655,7 +801,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((12, 296), "▲/▼:换卡  OK:刷卡开门  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 📋 3. 会议待命 (IDLE 状态) =================
+        # ================= 📋 4. 会议待命 (IDLE 状态) =================
         elif self.state == "IDLE":
             draw.rounded_rectangle([(65, 38), (175, 66)], radius=6, fill=(59, 130, 246))
             draw.text((82, 43), "【 会议待命 】", fill=(255, 255, 255), font=font_md)
@@ -672,7 +818,7 @@ class CardBridge:
             draw.rectangle([(0, 290), (W, 320)], fill=(2, 6, 23))
             draw.text((32, 298), "OK: 录音  |  UP+DN: 选功能", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🎙️ 4. 正在录音 (RECORDING 状态) =================
+        # ================= 🎙️ 5. 正在录音 (RECORDING 状态) =================
         elif self.state == "RECORDING":
             elapsed = int(time.time() - self.record_start_time)
             mm, ss = divmod(elapsed, 60)
@@ -692,7 +838,7 @@ class CardBridge:
             draw.rectangle([(0, 290), (W, 320)], fill=(2, 6, 23))
             draw.text((25, 298), "OK: 结束录音 | UP+DN: 取消返回", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🧠 5. AI 提炼中 (PROCESSING 状态) =================
+        # ================= 🧠 6. AI 提炼中 (PROCESSING 状态) =================
         elif self.state == "PROCESSING":
             draw.rounded_rectangle([(50, 50), (190, 80)], radius=6, fill=(168, 85, 247))
             draw.text((68, 55), "【 AI 提炼中 】", fill=(255, 255, 255), font=font_md)
@@ -703,7 +849,7 @@ class CardBridge:
             draw.text((30, 210), "● 广播 12 大多机器人推送渠道", fill=(250, 204, 21), font=font_sm)
             draw.text((30, 240), "● 同步创建飞书 Docx 云文档", fill=(56, 189, 248), font=font_sm)
 
-        # ================= 📄 6. 纪要展示 (SUMMARIZED 状态) =================
+        # ================= 📄 7. 纪要展示 (SUMMARIZED 状态) =================
         elif self.state == "SUMMARIZED":
             draw.rounded_rectangle([(45, 32), (195, 56)], radius=4, fill=(16, 185, 129))
             draw.text((68, 36), "【 纪要已生成 】", fill=(255, 255, 255), font=font_md)
@@ -731,7 +877,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((16, 296), "▲/▼:切Todo  OK:重录  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🎯 7. 每日待办打卡模式 (TODO 状态) =================
+        # ================= 🎯 8. 每日待办打卡模式 (TODO 状态) =================
         elif self.state == "TODO":
             draw.rounded_rectangle([(45, 34), (195, 58)], radius=6, fill=(16, 185, 129))
             draw.text((62, 38), "🎯 每日待办打卡", fill=(255, 255, 255), font=font_md)
@@ -758,7 +904,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((12, 296), "▲/▼:选择  OK:打钩/取消  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= ⏳ 8. 专注番茄时钟 (POMODORO 状态) =================
+        # ================= ⏳ 9. 专注番茄时钟 (POMODORO 状态) =================
         elif self.state == "POMODORO":
             pomo_color = (239, 68, 68) if self.pomo_mode_type == "WORK" else (16, 185, 129)
             pomo_title = "⏳ 深度专注工作" if self.pomo_mode_type == "WORK" else "☕ 休息时间"
@@ -781,7 +927,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((8, 296), "OK:启停  ▲:切工/休  ▼:重置  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 💡 9. 语音灵感速记 (MEMO 状态) =================
+        # ================= 💡 10. 语音灵感速记 (MEMO 状态) =================
         elif self.state == "MEMO":
             draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=(245, 158, 11))
             draw.text((62, 41), "💡 语音灵感速记", fill=(255, 255, 255), font=font_md)
@@ -796,7 +942,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((25, 296), "OK: 录制速记  |  UP+DN: 选功能", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🔋 10. 硬件状态诊断 (STATUS 状态) =================
+        # ================= 🔋 11. 硬件状态诊断 (STATUS 状态) =================
         elif self.state == "STATUS":
             draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=(14, 165, 233))
             draw.text((62, 41), "🔋 硬件状态诊断", fill=(255, 255, 255), font=font_md)
@@ -823,6 +969,10 @@ class CardBridge:
             "mode": self.current_mode,
             "menu_selected_index": self.menu_selected_index,
             "battery_soc": self.battery_soc,
+            "bt_is_playing": self.bt_is_playing,
+            "bt_volume": self.bt_volume,
+            "bt_current_track": self.bt_playlist[self.bt_track_index % len(self.bt_playlist)],
+            "bt_playback_seconds": self.bt_playback_seconds,
             "nfc_cards": self.nfc_cards,
             "nfc_selected_index": self.nfc_selected_index,
             "nfc_swiping": self.nfc_swiping,
@@ -869,6 +1019,10 @@ class CardBridge:
             "mode": self.current_mode,
             "modes_list": CARD_MODES,
             "menu_selected_index": self.menu_selected_index,
+            "bt_is_playing": self.bt_is_playing,
+            "bt_volume": self.bt_volume,
+            "bt_current_track": self.bt_playlist[self.bt_track_index % len(self.bt_playlist)],
+            "bt_playback_seconds": self.bt_playback_seconds,
             "nfc_cards": self.nfc_cards,
             "nfc_selected_index": self.nfc_selected_index,
             "nfc_swiping": self.nfc_swiping,
@@ -889,6 +1043,17 @@ class CardBridge:
             self.enter_menu()
             self.broadcast({"cmd": "combo_menu", "timestamp": time.time()})
             return {"code": 0, "msg": "已触发组合键，返回功能选择菜单", "data": self.get_screen_state()}
+
+        # 蓝牙音频控制指令
+        elif event_name in ["bt_play", "bt_pause", "bt_toggle", "audio_play"]:
+            self.toggle_bt_audio()
+            return {"code": 0, "msg": f"蓝牙音频: {'播放中' if self.bt_is_playing else '已暂停'}", "data": self.get_screen_state()}
+        elif event_name in ["bt_next", "audio_next"]:
+            self.next_bt_track()
+            return {"code": 0, "msg": "已切换下一首", "data": self.get_screen_state()}
+        elif event_name in ["bt_prev", "audio_prev"]:
+            self.prev_bt_track()
+            return {"code": 0, "msg": "已切换上一首", "data": self.get_screen_state()}
 
         # NFC 刷卡开门
         elif event_name in ["nfc_swipe", "swipe"]:
