@@ -574,6 +574,16 @@ async def trigger_card_event(body: dict):
     return get_card_bridge().trigger_event(event_name)
 
 
+@app.post("/api/card/mode")
+async def set_card_mode(body: dict):
+    mode_id = body.get("mode_id", "meeting")
+    if mode_id == "menu":
+        get_card_bridge().enter_menu()
+    else:
+        get_card_bridge().enter_mode(mode_id)
+    return {"code": 0, "msg": f"卡片已切换至模式: {mode_id}", "data": get_card_bridge().get_screen_state()}
+
+
 @app.post("/api/card/push")
 async def push_to_card(summary_data: dict):
     get_card_bridge().push_meeting_summary_to_card(summary_data)

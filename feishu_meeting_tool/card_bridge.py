@@ -30,6 +30,59 @@ def get_font(size: int = 14) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
+# ================= 🎴 AI Passport 六大核心功能模式定义 =================
+CARD_MODES = [
+    {
+        "id": "meeting",
+        "name": "智能会议纪要",
+        "icon": "📋",
+        "desc": "高清录音/AI总结/Todo与云文档",
+        "badge": "MEETING",
+        "color": (59, 130, 246),
+    },
+    {
+        "id": "todo",
+        "name": "每日待办打卡",
+        "icon": "🎯",
+        "desc": "上下键翻阅 / OK键标记完成打钩",
+        "badge": "TODO",
+        "color": (16, 185, 129),
+    },
+    {
+        "id": "pomodoro",
+        "name": "专注番茄时钟",
+        "icon": "⏳",
+        "desc": "25分钟深度专注 / 5分钟休息",
+        "badge": "POMODORO",
+        "color": (239, 68, 68),
+    },
+    {
+        "id": "memo",
+        "name": "语音灵感速记",
+        "icon": "💡",
+        "desc": "随时按住记录灵感并自动归档",
+        "badge": "MEMO",
+        "color": (245, 158, 11),
+    },
+    {
+        "id": "assistant",
+        "name": "AI 语音伴侣",
+        "icon": "🤖",
+        "desc": "随身 AI 实时问答与多机器人互动",
+        "badge": "AI CHAT",
+        "color": (139, 92, 246),
+    },
+    {
+        "id": "status",
+        "name": "硬件状态诊断",
+        "icon": "🔋",
+        "desc": "Wi-Fi信号/电量/TCP延时/内存",
+        "badge": "STATUS",
+        "color": (14, 165, 233),
+    },
+]
+
+
 class CardBridge:
     def __init__(self, host: str = "0.0.0.0", port: int = 5566):
         self.host = host
@@ -39,14 +92,37 @@ class CardBridge:
         self._lock = threading.Lock()
         self.is_running = False
 
-        # State machine (DISCONNECTED, IDLE, RECORDING, PROCESSING, SUMMARIZED)
-        self.state = "DISCONNECTED"
+        # Mode & State Machine
+        # States: "MENU", "IDLE", "RECORDING", "PROCESSING", "SUMMARIZED", "TODO", "POMODORO", "MEMO", "ASSISTANT", "STATUS"
+        self.current_mode = "meeting"
+        self.state = "IDLE"
+        self.menu_selected_index = 0
+
+        # Meeting data
         self.record_start_time = 0
         self.record_duration = 0
-        self.battery_soc = None
+        self.battery_soc = 85
         self.current_summary: Optional[Dict[str, Any]] = None
         self.current_todo_index = 0
         self._timer_thread: Optional[threading.Thread] = None
+
+        # Todo List Mode State
+        self.daily_todos = [
+            {"task": "评审《会议智能妙记》多机器人分发方案", "owner": "研发团队", "done": True, "priority": "P0"},
+            {"task": "联调 AI Passport 硬件 TCP 5566 桥接", "owner": "嵌入式组", "done": False, "priority": "P0"},
+            {"task": "配置飞书自建应用与群 Webhook 卡片", "owner": "管理员", "done": False, "priority": "P1"},
+            {"task": "同步钉钉 Stream 与 QQ OneBot 反向连接", "owner": "运维团队", "done": False, "priority": "P1"},
+        ]
+        self.todo_selected_index = 0
+
+        # Pomodoro Mode State
+        self.pomo_duration_total = 25 * 60
+        self.pomo_remaining_seconds = 25 * 60
+        self.pomo_is_running = False
+        self.pomo_mode_type = "WORK" # "WORK" or "BREAK"
+
+        # Voice Memo State
+        self.memos_count = 3
 
         # Callbacks
         self.on_record_start_callbacks: List[Callable] = []
@@ -90,8 +166,7 @@ class CardBridge:
                 logger.info(f"AI Passport 真实硬件卡片/模拟器已连接: {addr}")
                 with self._lock:
                     self.clients.append(client_sock)
-                
-                self.state = "IDLE"
+
                 self.battery_soc = 85
                 self.render_and_send_frame()
 
@@ -123,9 +198,6 @@ class CardBridge:
             with self._lock:
                 if client_sock in self.clients:
                     self.clients.remove(client_sock)
-                if len(self.clients) == 0:
-                    self.state = "DISCONNECTED"
-                    self.battery_soc = None
             try:
                 client_sock.close()
             except Exception:
@@ -140,12 +212,19 @@ class CardBridge:
             if msg_type == "button":
                 name = msg.get("name")
                 state = msg.get("state")
-                if state == "down":
+                if state == "down" or state == "click":
                     self._handle_button_press(name)
 
             elif msg_type == "battery":
                 self.battery_soc = msg.get("soc", 85)
                 self.render_and_send_frame()
+
+            elif msg_type in ["combo_menu", "back_to_menu"]:
+                self.enter_menu()
+
+            elif msg_type == "select_mode":
+                mode_id = msg.get("mode_id", "meeting")
+                self.enter_mode(mode_id)
 
             elif msg_type == "record_start":
                 self._start_recording()
@@ -157,24 +236,144 @@ class CardBridge:
                 self.send_to_client(client_sock, {"event": "pong", "time": time.time()})
 
         except Exception as e:
-            logger.error(f"\u5904\u7406\u5361\u7247\u6d88\u606f\u5931\u8d25: {e}, \u539f\u59cb\u6d88\u606f: {message_str}")
+            logger.error(f"处理卡片消息失败: {e}, 原始消息: {message_str}")
+
+    # ================= 🎛️ 菜单与多模式切换状态机 =================
+
+    def enter_menu(self):
+        """返回功能选择菜单 (可上下选择)"""
+        logger.info("🎛️ AI Passport 触发组合键，已返回【功能选择菜单】")
+        self.state = "MENU"
+        self.render_and_send_frame()
+        self.broadcast({
+            "event": "state_changed",
+            "state": "MENU",
+            "mode": "menu",
+            "selected_index": self.menu_selected_index,
+            "modes": CARD_MODES,
+        })
+
+    def enter_mode(self, mode_id: str):
+        """进入选中的功能模式"""
+        self.current_mode = mode_id
+        for idx, m in enumerate(CARD_MODES):
+            if m["id"] == mode_id:
+                self.menu_selected_index = idx
+                break
+
+        if mode_id == "meeting":
+            self.state = "SUMMARIZED" if self.current_summary else "IDLE"
+        elif mode_id == "todo":
+            self.state = "TODO"
+        elif mode_id == "pomodoro":
+            self.state = "POMODORO"
+        elif mode_id == "memo":
+            self.state = "MEMO"
+        elif mode_id == "assistant":
+            self.state = "ASSISTANT"
+        elif mode_id == "status":
+            self.state = "STATUS"
+        else:
+            self.state = "IDLE"
+
+        logger.info(f"✨ AI Passport 已进入功能模式: {mode_id} (State: {self.state})")
+        self.render_and_send_frame()
+        self.broadcast({
+            "event": "mode_entered",
+            "mode_id": mode_id,
+            "state": self.state,
+        })
 
     def _handle_button_press(self, btn_name: str):
-        logger.info(f"\u6536\u5230\u6309\u952e\u89e6\u53d1: {btn_name}, \u5f53\u524d\u72b6\u6001: {self.state}")
-        if btn_name == "OK":
-            if self.state in ["IDLE", "SUMMARIZED"]:
-                self._start_recording()
-            elif self.state == "RECORDING":
-                self._stop_recording()
-        elif btn_name == "UP":
-            if self.current_summary and self.current_summary.get("todos"):
-                self.current_todo_index = max(0, self.current_todo_index - 1)
+        logger.info(f"收到硬件按键触发: {btn_name}, 当前状态: {self.state}, 当前模式: {self.current_mode}")
+
+        # 1. 处于功能选择菜单中 (MENU 状态)
+        if self.state == "MENU":
+            if btn_name in ["UP", "KEY_UP", "key_up"]:
+                self.menu_selected_index = (self.menu_selected_index - 1) % len(CARD_MODES)
                 self.render_and_send_frame()
-        elif btn_name == "DOWN":
-            if self.current_summary and self.current_summary.get("todos"):
-                max_idx = len(self.current_summary["todos"]) - 1
-                self.current_todo_index = min(max_idx, self.current_todo_index + 1)
+            elif btn_name in ["DOWN", "KEY_DOWN", "key_down"]:
+                self.menu_selected_index = (self.menu_selected_index + 1) % len(CARD_MODES)
                 self.render_and_send_frame()
+            elif btn_name in ["OK", "KEY_OK", "key_ok"]:
+                selected_mode = CARD_MODES[self.menu_selected_index]["id"]
+                self.enter_mode(selected_mode)
+            return
+
+        # 2. 处于各具体功能模式内
+        if btn_name in ["COMBO_MENU", "combo_menu", "BACK_TO_MENU", "back_to_menu"]:
+            self.enter_menu()
+            return
+
+        # 模式 A: 智能会议模式 (Meeting)
+        if self.current_mode == "meeting" or self.state in ["IDLE", "RECORDING", "PROCESSING", "SUMMARIZED"]:
+            if btn_name == "OK":
+                if self.state in ["IDLE", "SUMMARIZED"]:
+                    self._start_recording()
+                elif self.state == "RECORDING":
+                    self._stop_recording()
+            elif btn_name == "UP":
+                if self.current_summary and self.current_summary.get("todos"):
+                    self.current_todo_index = max(0, self.current_todo_index - 1)
+                    self.render_and_send_frame()
+            elif btn_name == "DOWN":
+                if self.current_summary and self.current_summary.get("todos"):
+                    max_idx = len(self.current_summary["todos"]) - 1
+                    self.current_todo_index = min(max_idx, self.current_todo_index + 1)
+                    self.render_and_send_frame()
+
+        # 模式 B: 每日待办打卡 (Todo)
+        elif self.current_mode == "todo" or self.state == "TODO":
+            if btn_name == "UP":
+                self.todo_selected_index = max(0, self.todo_selected_index - 1)
+                self.render_and_send_frame()
+            elif btn_name == "DOWN":
+                self.todo_selected_index = min(len(self.daily_todos) - 1, self.todo_selected_index + 1)
+                self.render_and_send_frame()
+            elif btn_name == "OK":
+                if 0 <= self.todo_selected_index < len(self.daily_todos):
+                    self.daily_todos[self.todo_selected_index]["done"] = not self.daily_todos[self.todo_selected_index]["done"]
+                    self.render_and_send_frame()
+
+        # 模式 C: 专注番茄钟 (Pomodoro)
+        elif self.current_mode == "pomodoro" or self.state == "POMODORO":
+            if btn_name == "OK":
+                self.pomo_is_running = not self.pomo_is_running
+                if self.pomo_is_running:
+                    threading.Thread(target=self._pomo_timer_loop, daemon=True).start()
+                self.render_and_send_frame()
+            elif btn_name == "DOWN": # 重置
+                self.pomo_is_running = False
+                self.pomo_remaining_seconds = self.pomo_duration_total
+                self.render_and_send_frame()
+            elif btn_name == "UP": # 切换专注/休息
+                self.pomo_mode_type = "BREAK" if self.pomo_mode_type == "WORK" else "WORK"
+                self.pomo_duration_total = (5 * 60) if self.pomo_mode_type == "BREAK" else (25 * 60)
+                self.pomo_remaining_seconds = self.pomo_duration_total
+                self.render_and_send_frame()
+
+        # 模式 D: 语音灵感速记 (Memo)
+        elif self.current_mode == "memo" or self.state == "MEMO":
+            if btn_name == "OK":
+                self.memos_count += 1
+                self.render_and_send_frame()
+
+        # 模式 E: 状态诊断 (Status)
+        elif self.current_mode == "status" or self.state == "STATUS":
+            if btn_name in ["UP", "DOWN", "OK"]:
+                self.render_and_send_frame()
+
+    def _pomo_timer_loop(self):
+        while self.is_running and self.pomo_is_running and self.state == "POMODORO":
+            time.sleep(1.0)
+            if self.pomo_is_running and self.state == "POMODORO":
+                if self.pomo_remaining_seconds > 0:
+                    self.pomo_remaining_seconds -= 1
+                    self.render_and_send_frame()
+                else:
+                    self.pomo_is_running = False
+                    self.render_and_send_frame()
+                    break
 
     def _start_recording(self):
         self.state = "RECORDING"
@@ -243,6 +442,7 @@ class CardBridge:
                 bot_secret=cfg.feishu_bot_secret,
                 doc_folder_token=cfg.feishu_doc_folder_token,
             )
+            doc_url = None
             try:
                 doc_url = feishu.create_feishu_doc(summary_data)
                 summary_data["doc_url"] = doc_url
@@ -251,15 +451,15 @@ class CardBridge:
                 logger.warning(f"自动创建飞书文档异常: {e}")
                 summary_data["doc_url"] = "https://feishu.cn"
 
-            # 2. 自动向所有启用的机器人渠道广播会议纪要通知卡片（包含文档链接、决议与待办）
+            # 2. 自动向启用的多机器人渠道广播通知
             try:
                 from .bot_notifier import BotNotifier
-                bot_res = BotNotifier.broadcast(cfg.bot_channels, summary_data, doc_url=doc_url)
+                bot_res = BotNotifier.broadcast(cfg.bot_channels, summary_data, doc_url=doc_url or "")
                 logger.info(f"✔ 卡片录音结束，已自动向启用的多机器人渠道广播通知: {bot_res}")
             except Exception as e:
                 logger.warning(f"自动广播多机器人通知失败: {e}")
 
-            # 3. 自动归档至历史记录与文档链接库
+            # 3. 自动归档至历史记录
             try:
                 from .history_manager import save_meeting_record
                 save_meeting_record(summary_data, doc_url=doc_url, scenario=cfg.default_scenario, source="card")
@@ -271,7 +471,7 @@ class CardBridge:
             self.state = "SUMMARIZED"
             self.render_and_send_frame()
 
-            # 3. 广播给前端 Web 工作台及模拟器客户端
+            # 4. 广播给前端 Web 工作台及模拟器客户端
             self.broadcast({
                 "event": "meeting_processed",
                 "title": summary_data.get("title", "会议纪要"),
@@ -288,12 +488,15 @@ class CardBridge:
     def push_meeting_summary_to_card(self, summary_data: Dict[str, Any]):
         self.current_summary = summary_data
         self.current_todo_index = 0
+        self.current_mode = "meeting"
         self.state = "SUMMARIZED"
         self.render_and_send_frame()
 
     def render_and_send_frame(self):
         frame_msg = self._generate_lcd_frame()
         self.broadcast(frame_msg)
+
+    # ================= 🎨 240x320 高清 LCD 画面渲染引擎 =================
 
     def _generate_lcd_frame(self) -> Dict[str, Any]:
         W, H = 240, 320
@@ -305,98 +508,209 @@ class CardBridge:
         now_str = time.strftime("%H:%M")
         draw.text((6, 5), "AI PASSPORT", fill=(250, 204, 21), font=get_font(12))
         draw.text((106, 5), now_str, fill=(241, 245, 249), font=get_font(12))
-        draw.text((172, 5), f"\u7535\u91cf {self.battery_soc}%", fill=(52, 211, 153), font=get_font(12))
+        draw.text((172, 5), f"电量 {self.battery_soc}%", fill=(52, 211, 153), font=get_font(12))
 
         font_sm = get_font(12)
         font_md = get_font(14)
         font_lg = get_font(16)
 
-        if self.state == "IDLE":
-            draw.rounded_rectangle([(65, 42), (175, 70)], radius=6, fill=(59, 130, 246))
-            draw.text((82, 47), "\u3010 IDLE \u5f85\u547d \u3011", fill=(255, 255, 255), font=font_md)
+        # ================= 🎛️ 1. 功能选择主菜单 (MENU 状态) =================
+        if self.state == "MENU":
+            # 顶部模式标题
+            draw.rounded_rectangle([(40, 34), (200, 58)], radius=6, fill=(59, 130, 246))
+            draw.text((58, 38), "【 功能选择菜单 】", fill=(255, 255, 255), font=font_md)
 
-            draw.text((45, 95), "\u98de\u4e66\u4f1a\u8bae\u667a\u80fd\u80f8\u5361", fill=(56, 189, 248), font=font_lg)
-            
-            draw.rectangle([(16, 138), (224, 252)], outline=(51, 65, 85), fill=(30, 41, 59))
-            draw.text((26, 152), "\u25cf \u5355\u51fb OK: \u5f00\u59cb\u4f1a\u8bae\u5f55\u97f3", fill=(74, 222, 128), font=font_sm)
-            draw.text((26, 182), "\u25cf \u518d\u6b21 OK: \u7ed3\u675f\u5e76\u63d0\u70bc\u7eaa\u8981", fill=(248, 113, 113), font=font_sm)
-            draw.text((26, 212), "\u25cf UP/DOWN: \u67e5\u770b Todo \u5f85\u529e", fill=(147, 197, 253), font=font_sm)
+            # 菜单选项卡片列表 (上下按键翻阅，当前项高亮)
+            start_y = 66
+            for idx, mode in enumerate(CARD_MODES):
+                y = start_y + idx * 36
+                is_selected = (idx == self.menu_selected_index)
 
-            draw.text((40, 285), "ESP32-C3 \u00b7 16kHz \u9ad8\u6e05\u97f3\u9891", fill=(100, 116, 139), font=font_sm)
+                if is_selected:
+                    # 高亮选中项 (带荧光边框与指示点)
+                    draw.rounded_rectangle([(10, y), (230, y + 32)], radius=6, fill=(30, 58, 138), outline=(56, 189, 248), width=2)
+                    draw.text((16, y + 7), f"▶ {mode['icon']} {mode['name']}", fill=(255, 255, 255), font=font_md)
+                    draw.text((165, y + 9), mode['badge'], fill=(125, 211, 252), font=get_font(10))
+                else:
+                    # 普通选项
+                    draw.rounded_rectangle([(10, y), (230, y + 32)], radius=6, fill=(30, 41, 59), outline=(51, 65, 85))
+                    draw.text((18, y + 7), f"{mode['icon']} {mode['name']}", fill=(203, 213, 225), font=font_md)
+                    draw.text((165, y + 9), mode['badge'], fill=(100, 116, 139), font=get_font(10))
 
+            # 底部按键提示
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((18, 296), "▲/▼:选择  OK:进入  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 📋 2. 会议待命 (IDLE 状态) =================
+        elif self.state == "IDLE":
+            draw.rounded_rectangle([(65, 38), (175, 66)], radius=6, fill=(59, 130, 246))
+            draw.text((82, 43), "【 会议待命 】", fill=(255, 255, 255), font=font_md)
+
+            draw.text((45, 85), "会议智能录音与纪要", fill=(56, 189, 248), font=font_lg)
+
+            draw.rectangle([(16, 120), (224, 250)], outline=(51, 65, 85), fill=(30, 41, 59))
+            draw.text((26, 132), "● 单击 OK: 开始会议录音", fill=(74, 222, 128), font=font_sm)
+            draw.text((26, 162), "● 再次 OK: 结束并提炼纪要", fill=(248, 113, 113), font=font_sm)
+            draw.text((26, 192), "● UP/DN: 翻阅 Todo 任务", fill=(147, 197, 253), font=font_sm)
+            draw.text((26, 222), "● 组合键: 返回功能选择菜单", fill=(250, 204, 21), font=font_sm)
+
+            draw.text((25, 265), "ESP32-C3 · 16kHz 高清音频", fill=(100, 116, 139), font=font_sm)
+            draw.rectangle([(0, 290), (W, 320)], fill=(2, 6, 23))
+            draw.text((32, 298), "OK: 录音  |  UP+DN: 选功能", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 🎙️ 3. 正在录音 (RECORDING 状态) =================
         elif self.state == "RECORDING":
             elapsed = int(time.time() - self.record_start_time)
             mm, ss = divmod(elapsed, 60)
             time_str = f"{mm:02d}:{ss:02d}"
 
             draw.rounded_rectangle([(50, 42), (190, 72)], radius=6, fill=(225, 29, 72))
-            draw.text((64, 47), "\u25cf \u6b63\u5728\u5f55\u97f3 REC", fill=(255, 255, 255), font=font_md)
+            draw.text((64, 47), "● 正在录音 REC", fill=(255, 255, 255), font=font_md)
 
-            draw.text((70, 100), time_str, fill=(255, 255, 255), font=get_font(32))
+            draw.text((70, 95), time_str, fill=(255, 255, 255), font=get_font(32))
 
-            draw.text((36, 175), "\u3010 \u9ea6\u514b\u98ce\u5168\u53cc\u5de5\u91c7\u96c6\u4e2d \u3011", fill=(251, 146, 60), font=font_md)
-            draw.text((58, 205), "\u91c7\u6837\u7387: 16kHz 16-bit", fill=(148, 163, 184), font=font_sm)
+            draw.text((36, 165), "【 麦克风全双工采集 】", fill=(251, 146, 60), font=font_md)
+            draw.text((58, 195), "采样率: 16kHz 16-bit", fill=(148, 163, 184), font=font_sm)
 
-            draw.rectangle([(20, 255), (220, 295)], fill=(30, 41, 59), outline=(225, 29, 72))
-            draw.text((32, 267), "\u6309 [ OK ] \u7ed3\u675f\u5e76\u751f\u6210\u7eaa\u8981", fill=(253, 224, 71), font=font_sm)
+            draw.rectangle([(20, 240), (220, 275)], fill=(30, 41, 59), outline=(225, 29, 72))
+            draw.text((32, 250), "按 [ OK ] 结束并生成纪要", fill=(253, 224, 71), font=font_sm)
 
+            draw.rectangle([(0, 290), (W, 320)], fill=(2, 6, 23))
+            draw.text((25, 298), "OK: 结束录音 | UP+DN: 取消返回", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 🧠 4. AI 提炼中 (PROCESSING 状态) =================
         elif self.state == "PROCESSING":
-            draw.rounded_rectangle([(50, 55), (190, 85)], radius=6, fill=(168, 85, 247))
-            draw.text((68, 60), "\u3010 AI \u63d0\u70bc\u4e2d \u3011", fill=(255, 255, 255), font=font_md)
+            draw.rounded_rectangle([(50, 50), (190, 80)], radius=6, fill=(168, 85, 247))
+            draw.text((68, 55), "【 AI 提炼中 】", fill=(255, 255, 255), font=font_md)
 
-            draw.text((40, 135), "\u6b63\u5728\u89e3\u6790\u4f1a\u8bae\u8bed\u97f3...", fill=(241, 245, 249), font=font_md)
-            draw.text((30, 170), "\u25cf \u63d0\u70bc\u6838\u5fc3\u51b3\u8bae (Decisions)", fill=(52, 211, 153), font=font_sm)
-            draw.text((30, 200), "\u25cf \u68b3\u7406\u884c动\u9879 (Action Items)", fill=(96, 165, 250), font=font_sm)
-            draw.text((30, 230), "\u25cf \u540c\u6b65\u98de\u4e66\u7fa4\u5361\u7247\u4e0e\u4e91\u6587\u6863", fill=(250, 204, 21), font=font_sm)
+            draw.text((40, 115), "正在解析会议语音...", fill=(241, 245, 249), font=font_md)
+            draw.text((30, 150), "● 提炼核心决议 (Decisions)", fill=(52, 211, 153), font=font_sm)
+            draw.text((30, 180), "● 梳理行动项 (Action Items)", fill=(96, 165, 250), font=font_sm)
+            draw.text((30, 210), "● 广播 12 大多机器人推送渠道", fill=(250, 204, 21), font=font_sm)
+            draw.text((30, 240), "● 同步创建飞书 Docx 云文档", fill=(56, 189, 248), font=font_sm)
 
+        # ================= 📄 5. 纪要展示 (SUMMARIZED 状态) =================
         elif self.state == "SUMMARIZED":
-            draw.rounded_rectangle([(55, 34), (185, 58)], radius=4, fill=(16, 185, 129))
-            draw.text((66, 38), "【 飞书文档已就绪 】", fill=(255, 255, 255), font=font_sm)
+            draw.rounded_rectangle([(45, 32), (195, 56)], radius=4, fill=(16, 185, 129))
+            draw.text((68, 36), "【 纪要已生成 】", fill=(255, 255, 255), font=font_md)
 
-            title = self.current_summary.get("title", "会议智能纪要") if self.current_summary else "会议纪要"
-            draw.text((12, 66), title[:13], fill=(56, 189, 248), font=font_md)
+            title = (self.current_summary.get("title", "会议纪要")) if self.current_summary else "会议纪要"
+            draw.text((12, 65), title[:14], fill=(255, 255, 255), font=font_md)
 
-            draw.text((12, 92), "【 核心决议 】:", fill=(250, 204, 21), font=font_sm)
-            decisions = (self.current_summary.get("decisions") or []) if self.current_summary else []
-            for i, dec in enumerate(decisions[:2]):
-                draw.text((16, 112 + i * 18), f"• {dec[:14]}", fill=(226, 232, 240), font=font_sm)
-
-            todos = (self.current_summary.get("todos") or []) if self.current_summary else []
-            draw.text((12, 158), f"\u3010 \u5f85\u529e \u3011({self.current_todo_index+1}/{max(1, len(todos))}):", fill=(96, 165, 250), font=font_sm)
-
+            todos = self.current_summary.get("todos", []) if self.current_summary else []
             if todos:
-                cur_todo = todos[self.current_todo_index]
-                draw.rectangle([(10, 180), (230, 278)], fill=(30, 41, 59), outline=(59, 130, 246))
-                
-                owner = cur_todo.get("owner", "\u672a\u6307\u5b9a")
-                task = cur_todo.get("task", "")
-                due = cur_todo.get("due", "\u5c3d\u5feb")
-                prio = cur_todo.get("priority", "P1")
+                cur_todo = todos[self.current_todo_index % len(todos)]
+                draw.rectangle([(8, 92), (232, 230)], fill=(30, 41, 59), outline=(56, 189, 248), width=1)
 
-                draw.text((18, 188), f"\u3010{owner}\u3011 ({prio})", fill=(251, 146, 60), font=font_md)
-                draw.text((18, 214), f"\u4efb\u52a1: {task[:24]}", fill=(241, 245, 249), font=font_sm)
-                draw.text((18, 248), f"\u622a\u6b62: {due}", fill=(74, 222, 128), font=font_sm)
+                draw.text((16, 100), f"Todo 待办 ({self.current_todo_index + 1}/{len(todos)})", fill=(56, 189, 248), font=font_md)
+                draw.text((16, 126), f"责任人: {cur_todo.get('owner', '待定')}", fill=(250, 204, 21), font=font_sm)
+                draw.text((16, 148), f"截止: {cur_todo.get('due', '尽快')}", fill=(148, 163, 184), font=font_sm)
 
-            draw.text((20, 292), "\u6309 UP/DOWN \u7ffb\u9875 | \u6309 OK \u65b0\u5f55\u97f3", fill=(148, 163, 184), font=font_sm)
+                task_text = cur_todo.get("task", "")
+                draw.text((16, 175), task_text[:15], fill=(241, 245, 249), font=font_sm)
+                if len(task_text) > 15:
+                    draw.text((16, 195), task_text[15:30], fill=(241, 245, 249), font=font_sm)
+            else:
+                draw.rectangle([(8, 92), (232, 230)], fill=(30, 41, 59), outline=(71, 85, 105))
+                draw.text((45, 140), "已完成会议总结分析", fill=(241, 245, 249), font=font_md)
 
-        pixels = list(img.getdata())
-        rgb565 = bytearray(W * H * 2)
-        idx = 0
-        for r, g, b in pixels:
-            px = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-            rgb565[idx] = (px >> 8) & 0xFF
-            rgb565[idx + 1] = px & 0xFF
-            idx += 2
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((16, 296), "▲/▼:切Todo  OK:重录  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        b64 = base64.b64encode(rgb565).decode("ascii")
+        # ================= 🎯 6. 每日待办打卡模式 (TODO 状态) =================
+        elif self.state == "TODO":
+            draw.rounded_rectangle([(45, 34), (195, 58)], radius=6, fill=(16, 185, 129))
+            draw.text((62, 38), "🎯 每日待办打卡", fill=(255, 255, 255), font=font_md)
+
+            done_cnt = sum(1 for t in self.daily_todos if t.get("done"))
+            draw.text((14, 66), f"任务完成度: {done_cnt}/{len(self.daily_todos)}", fill=(52, 211, 153), font=font_sm)
+
+            start_y = 90
+            for idx, item in enumerate(self.daily_todos):
+                y = start_y + idx * 46
+                is_sel = (idx == self.todo_selected_index)
+                is_done = item.get("done", False)
+
+                bg_color = (30, 58, 138) if is_sel else (30, 41, 59)
+                border_color = (56, 189, 248) if is_sel else (51, 65, 85)
+                draw.rounded_rectangle([(10, y), (230, y + 40)], radius=6, fill=bg_color, outline=border_color)
+
+                mark = "☑ [已完成]" if is_done else "☐ [进行中]"
+                mark_color = (74, 222, 128) if is_done else (251, 146, 60)
+                draw.text((16, y + 5), mark, fill=mark_color, font=font_sm)
+                draw.text((105, y + 5), f"[{item.get('owner', '')}]", fill=(148, 163, 184), font=get_font(11))
+                draw.text((16, y + 22), item.get("task", "")[:15], fill=(255, 255, 255), font=font_sm)
+
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((12, 296), "▲/▼:选择  OK:打钩/取消  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
+
+        # ================= ⏳ 7. 专注番茄时钟 (POMODORO 状态) =================
+        elif self.state == "POMODORO":
+            pomo_color = (239, 68, 68) if self.pomo_mode_type == "WORK" else (16, 185, 129)
+            pomo_title = "⏳ 深度专注工作" if self.pomo_mode_type == "WORK" else "☕ 休息时间"
+            draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=pomo_color)
+            draw.text((62, 41), pomo_title, fill=(255, 255, 255), font=font_md)
+
+            mm, ss = divmod(self.pomo_remaining_seconds, 60)
+            time_display = f"{mm:02d}:{ss:02d}"
+            draw.text((55, 100), time_display, fill=(255, 255, 255), font=get_font(42))
+
+            status_txt = "🔥 正在专注倒计时..." if self.pomo_is_running else "⏸️ 已暂停 (按 OK 开始)"
+            draw.text((50, 180), status_txt, fill=(253, 224, 71), font=font_md)
+
+            # 进度条
+            progress = 1.0 - (self.pomo_remaining_seconds / max(1, self.pomo_duration_total))
+            draw.rectangle([(20, 220), (220, 235)], fill=(30, 41, 59), outline=(71, 85, 105))
+            fill_w = int(20 + progress * 200)
+            draw.rectangle([(20, 220), (fill_w, 235)], fill=pomo_color)
+
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((8, 296), "OK:启停  ▲:切工/休  ▼:重置  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 💡 8. 语音灵感速记 (MEMO 状态) =================
+        elif self.state == "MEMO":
+            draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=(245, 158, 11))
+            draw.text((62, 41), "💡 语音灵感速记", fill=(255, 255, 255), font=font_md)
+
+            draw.text((30, 105), f"已归档灵感条目: {self.memos_count} 条", fill=(250, 204, 21), font=font_md)
+
+            draw.rectangle([(16, 145), (224, 245)], fill=(30, 41, 59), outline=(245, 158, 11))
+            draw.text((26, 160), "● 按 OK 记录 15秒灵感语音", fill=(74, 222, 128), font=font_sm)
+            draw.text((26, 190), "● AI 自动转文字并保存便签", fill=(147, 197, 253), font=font_sm)
+            draw.text((26, 220), "● 自动同步推送至手机/群聊", fill=(248, 113, 113), font=font_sm)
+
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((25, 296), "OK: 录制速记  |  UP+DN: 选功能", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 🔋 9. 硬件状态诊断 (STATUS 状态) =================
+        elif self.state == "STATUS":
+            draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=(14, 165, 233))
+            draw.text((62, 41), "🔋 硬件状态诊断", fill=(255, 255, 255), font=font_md)
+
+            draw.rectangle([(12, 85), (228, 260)], fill=(30, 41, 59), outline=(51, 65, 85))
+            draw.text((20, 98), "● 主控: ESP32-C3 (8MB Flash)", fill=(241, 245, 249), font=font_sm)
+            draw.text((20, 128), f"● 电池电量: {self.battery_soc}% (正常)", fill=(52, 211, 153), font=font_sm)
+            draw.text((20, 158), "● Wi-Fi 状态: 已连入局域网", fill=(56, 189, 248), font=font_sm)
+            draw.text((20, 188), f"● TCP 桥接端口: 5566 (在线)", fill=(250, 204, 21), font=font_sm)
+            draw.text((20, 218), f"● 在线客户端数: {len(self.clients)} 台", fill=(168, 85, 247), font=font_sm)
+
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((35, 296), "按 组合键 (UP+DN) 返回菜单", fill=(148, 163, 184), font=font_sm)
+
+        # 转换为 base64 PNG 帧供 Web 实时显示
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64_png = base64.b64encode(buf.getvalue()).decode("utf-8")
+
         return {
-            "type": "frame",
-            "x": 0,
-            "y": 0,
-            "w": W,
-            "h": H,
-            "invert": 0,
-            "rgb565_b64": b64,
+            "type": "lcd_frame",
+            "state": self.state,
+            "mode": self.current_mode,
+            "menu_selected_index": self.menu_selected_index,
+            "battery_soc": self.battery_soc,
+            "frame_b64": b64_png,
+            "timestamp": time.time(),
         }
 
     def broadcast(self, data: Dict[str, Any]):
@@ -431,42 +745,65 @@ class CardBridge:
         else:
             duration = self.record_duration
 
+        frame = self._generate_lcd_frame()
+
         return {
             "state": self.state,
+            "mode": self.current_mode,
+            "modes_list": CARD_MODES,
+            "menu_selected_index": self.menu_selected_index,
             "is_connected": len(self.clients) > 0,
             "connected_count": len(self.clients),
             "battery_soc": self.battery_soc,
             "record_duration": duration,
             "current_summary": self.current_summary,
             "current_todo_index": self.current_todo_index,
+            "frame_b64": frame.get("frame_b64", ""),
         }
 
     def trigger_event(self, event_name: str) -> Dict[str, Any]:
-        is_connected = len(self.clients) > 0
-        if not is_connected:
-            return {
-                "code": -1,
-                "msg": "未检测到已连接的硬件胸卡设备 (请先接入 ESP32-C3 实体胸卡至 TCP 5566 端口)",
-                "data": self.get_screen_state(),
-            }
+        logger.info(f"触发卡片控制指令: {event_name}")
 
-        if event_name == "record_start":
+        # 组合键返回菜单
+        if event_name in ["combo_menu", "back_to_menu", "menu"]:
+            self.enter_menu()
+            self.broadcast({"cmd": "combo_menu", "timestamp": time.time()})
+            return {"code": 0, "msg": "已触发组合键，返回功能选择菜单", "data": self.get_screen_state()}
+
+        # 向上 / 向下 / 确认
+        elif event_name in ["key_up", "key_prev"]:
+            self._handle_button_press("UP")
+            self.broadcast({"cmd": "key_press", "key": "UP", "timestamp": time.time()})
+        elif event_name in ["key_down", "key_next"]:
+            self._handle_button_press("DOWN")
+            self.broadcast({"cmd": "key_press", "key": "DOWN", "timestamp": time.time()})
+        elif event_name in ["key_ok", "ok"]:
+            self._handle_button_press("OK")
+            self.broadcast({"cmd": "key_press", "key": "OK", "timestamp": time.time()})
+
+        # 会议录音启停
+        elif event_name == "record_start":
             self.broadcast({"cmd": "record_start", "timestamp": time.time()})
             self._start_recording()
         elif event_name == "record_stop":
             self.broadcast({"cmd": "record_stop", "timestamp": time.time()})
             self._stop_recording()
-        elif event_name == "key_prev":
-            self.broadcast({"cmd": "key_press", "key": "UP", "timestamp": time.time()})
-            self._handle_button_press("UP")
-        elif event_name == "key_next":
-            self.broadcast({"cmd": "key_press", "key": "DOWN", "timestamp": time.time()})
-            self._handle_button_press("DOWN")
         elif event_name == "fetch_summary":
             self.render_and_send_frame()
 
         return {
             "code": 0,
-            "msg": f"已向硬件胸卡下发控制指令: {event_name}",
+            "msg": f"已执行指令: {event_name}",
             "data": self.get_screen_state(),
         }
+
+
+_global_card_bridge: Optional[CardBridge] = None
+
+
+def get_card_bridge(host: str = "0.0.0.0", port: int = 5566) -> CardBridge:
+    global _global_card_bridge
+    if _global_card_bridge is None:
+        _global_card_bridge = CardBridge(host=host, port=port)
+        _global_card_bridge.start()
+    return _global_card_bridge
