@@ -30,7 +30,7 @@ def get_font(size: int = 14) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-# ================= 🎴 AI Passport 六大核心功能模式定义 =================
+# ================= 🎴 AI Passport 核心功能模式定义 (含 NFC 门禁) =================
 CARD_MODES = [
     {
         "id": "meeting",
@@ -39,6 +39,14 @@ CARD_MODES = [
         "desc": "高清录音/AI总结/Todo与云文档",
         "badge": "MEETING",
         "color": (59, 130, 246),
+    },
+    {
+        "id": "nfc",
+        "name": "NFC 智能门禁",
+        "icon": "🔑",
+        "desc": "模拟门禁/员工卡UID/刷卡开门通行",
+        "badge": "NFC ACCESS",
+        "color": (249, 115, 22),
     },
     {
         "id": "todo",
@@ -93,7 +101,7 @@ class CardBridge:
         self.is_running = False
 
         # Mode & State Machine
-        # States: "MENU", "IDLE", "RECORDING", "PROCESSING", "SUMMARIZED", "TODO", "POMODORO", "MEMO", "ASSISTANT", "STATUS"
+        # States: "MENU", "IDLE", "RECORDING", "PROCESSING", "SUMMARIZED", "NFC", "TODO", "POMODORO", "MEMO", "ASSISTANT", "STATUS"
         self.current_mode = "meeting"
         self.state = "IDLE"
         self.menu_selected_index = 0
@@ -105,6 +113,17 @@ class CardBridge:
         self.current_summary: Optional[Dict[str, Any]] = None
         self.current_todo_index = 0
         self._timer_thread: Optional[threading.Thread] = None
+
+        # ================= 🔑 NFC 智能门禁卡包数据 =================
+        self.nfc_cards = [
+            {"id": "card_1", "name": "公司总部主楼大门", "uid": "8A:3F:12:C9", "type": "Mifare Classic 1K", "active": True},
+            {"id": "card_2", "name": "研发中心核心实验室", "uid": "E4:5B:90:A1", "type": "ISO/IEC 14443A", "active": False},
+            {"id": "card_3", "name": "地下车库通行道闸", "uid": "7D:1C:44:88", "type": "Mifare Ultralight", "active": False},
+            {"id": "card_4", "name": "智能工位与云打印机", "uid": "2B:A0:55:7E", "type": "NFC Type-4 Tag", "active": False},
+        ]
+        self.nfc_selected_index = 0
+        self.nfc_swiping = False
+        self.nfc_swipe_time = 0
 
         # Todo List Mode State
         self.daily_todos = [
@@ -226,6 +245,9 @@ class CardBridge:
                 mode_id = msg.get("mode_id", "meeting")
                 self.enter_mode(mode_id)
 
+            elif msg_type in ["nfc_swipe", "swipe"]:
+                self.trigger_nfc_swipe()
+
             elif msg_type == "record_start":
                 self._start_recording()
             elif msg_type == "record_stop":
@@ -263,6 +285,8 @@ class CardBridge:
 
         if mode_id == "meeting":
             self.state = "SUMMARIZED" if self.current_summary else "IDLE"
+        elif mode_id == "nfc":
+            self.state = "NFC"
         elif mode_id == "todo":
             self.state = "TODO"
         elif mode_id == "pomodoro":
@@ -283,6 +307,47 @@ class CardBridge:
             "mode_id": mode_id,
             "state": self.state,
         })
+
+    def trigger_nfc_swipe(self):
+        """触发 NFC 门禁模拟刷卡通行"""
+        cur_card = self.nfc_cards[self.nfc_selected_index % len(self.nfc_cards)]
+        logger.info(f"🔑 AI Passport 触发 NFC 刷卡通行: {cur_card['name']} (UID: {cur_card['uid']})")
+        self.nfc_swiping = True
+        self.nfc_swipe_time = time.time()
+        self.render_and_send_frame()
+
+        self.broadcast({
+            "event": "nfc_swiped",
+            "card": cur_card,
+            "timestamp": time.time()
+        })
+
+        def _reset_swipe():
+            time.sleep(2.0)
+            self.nfc_swiping = False
+            self.render_and_send_frame()
+
+        threading.Thread(target=_reset_swipe, daemon=True).start()
+
+    def add_nfc_card(self, name: str, uid: str, card_type: str = "Mifare Classic 1K") -> Dict[str, Any]:
+        new_card = {
+            "id": f"card_{int(time.time()*1000)}",
+            "name": name.strip() or "未命名门禁卡",
+            "uid": uid.strip().upper(),
+            "type": card_type,
+            "active": False,
+        }
+        self.nfc_cards.append(new_card)
+        self.render_and_send_frame()
+        return new_card
+
+    def delete_nfc_card(self, card_id: str) -> bool:
+        initial_len = len(self.nfc_cards)
+        self.nfc_cards = [c for c in self.nfc_cards if c["id"] != card_id]
+        if self.nfc_selected_index >= len(self.nfc_cards):
+            self.nfc_selected_index = max(0, len(self.nfc_cards) - 1)
+        self.render_and_send_frame()
+        return len(self.nfc_cards) < initial_len
 
     def _handle_button_press(self, btn_name: str):
         logger.info(f"收到硬件按键触发: {btn_name}, 当前状态: {self.state}, 当前模式: {self.current_mode}")
@@ -305,7 +370,21 @@ class CardBridge:
             self.enter_menu()
             return
 
-        # 模式 A: 智能会议模式 (Meeting)
+        # 模式 1: NFC 智能门禁模式 (NFC)
+        if self.current_mode == "nfc" or self.state == "NFC":
+            if btn_name in ["UP", "KEY_UP", "key_up"]:
+                if self.nfc_cards:
+                    self.nfc_selected_index = (self.nfc_selected_index - 1) % len(self.nfc_cards)
+                    self.render_and_send_frame()
+            elif btn_name in ["DOWN", "KEY_DOWN", "key_down"]:
+                if self.nfc_cards:
+                    self.nfc_selected_index = (self.nfc_selected_index + 1) % len(self.nfc_cards)
+                    self.render_and_send_frame()
+            elif btn_name in ["OK", "KEY_OK", "key_ok"]:
+                self.trigger_nfc_swipe()
+            return
+
+        # 模式 2: 智能会议模式 (Meeting)
         if self.current_mode == "meeting" or self.state in ["IDLE", "RECORDING", "PROCESSING", "SUMMARIZED"]:
             if btn_name == "OK":
                 if self.state in ["IDLE", "SUMMARIZED"]:
@@ -322,7 +401,7 @@ class CardBridge:
                     self.current_todo_index = min(max_idx, self.current_todo_index + 1)
                     self.render_and_send_frame()
 
-        # 模式 B: 每日待办打卡 (Todo)
+        # 模式 3: 每日待办打卡 (Todo)
         elif self.current_mode == "todo" or self.state == "TODO":
             if btn_name == "UP":
                 self.todo_selected_index = max(0, self.todo_selected_index - 1)
@@ -335,7 +414,7 @@ class CardBridge:
                     self.daily_todos[self.todo_selected_index]["done"] = not self.daily_todos[self.todo_selected_index]["done"]
                     self.render_and_send_frame()
 
-        # 模式 C: 专注番茄钟 (Pomodoro)
+        # 模式 4: 专注番茄钟 (Pomodoro)
         elif self.current_mode == "pomodoro" or self.state == "POMODORO":
             if btn_name == "OK":
                 self.pomo_is_running = not self.pomo_is_running
@@ -352,13 +431,13 @@ class CardBridge:
                 self.pomo_remaining_seconds = self.pomo_duration_total
                 self.render_and_send_frame()
 
-        # 模式 D: 语音灵感速记 (Memo)
+        # 模式 5: 语音灵感速记 (Memo)
         elif self.current_mode == "memo" or self.state == "MEMO":
             if btn_name == "OK":
                 self.memos_count += 1
                 self.render_and_send_frame()
 
-        # 模式 E: 状态诊断 (Status)
+        # 模式 6: 状态诊断 (Status)
         elif self.current_mode == "status" or self.state == "STATUS":
             if btn_name in ["UP", "DOWN", "OK"]:
                 self.render_and_send_frame()
@@ -516,32 +595,67 @@ class CardBridge:
 
         # ================= 🎛️ 1. 功能选择主菜单 (MENU 状态) =================
         if self.state == "MENU":
-            # 顶部模式标题
-            draw.rounded_rectangle([(40, 34), (200, 58)], radius=6, fill=(59, 130, 246))
-            draw.text((58, 38), "【 功能选择菜单 】", fill=(255, 255, 255), font=font_md)
+            draw.rounded_rectangle([(40, 32), (200, 56)], radius=6, fill=(59, 130, 246))
+            draw.text((58, 36), "【 功能选择菜单 】", fill=(255, 255, 255), font=font_md)
 
             # 菜单选项卡片列表 (上下按键翻阅，当前项高亮)
-            start_y = 66
+            start_y = 62
             for idx, mode in enumerate(CARD_MODES):
-                y = start_y + idx * 36
+                y = start_y + idx * 32
                 is_selected = (idx == self.menu_selected_index)
 
                 if is_selected:
-                    # 高亮选中项 (带荧光边框与指示点)
-                    draw.rounded_rectangle([(10, y), (230, y + 32)], radius=6, fill=(30, 58, 138), outline=(56, 189, 248), width=2)
-                    draw.text((16, y + 7), f"▶ {mode['icon']} {mode['name']}", fill=(255, 255, 255), font=font_md)
-                    draw.text((165, y + 9), mode['badge'], fill=(125, 211, 252), font=get_font(10))
+                    draw.rounded_rectangle([(10, y), (230, y + 28)], radius=5, fill=(30, 58, 138), outline=(56, 189, 248), width=2)
+                    draw.text((16, y + 5), f"▶ {mode['icon']} {mode['name']}", fill=(255, 255, 255), font=font_md)
+                    draw.text((165, y + 7), mode['badge'], fill=(125, 211, 252), font=get_font(9))
                 else:
-                    # 普通选项
-                    draw.rounded_rectangle([(10, y), (230, y + 32)], radius=6, fill=(30, 41, 59), outline=(51, 65, 85))
-                    draw.text((18, y + 7), f"{mode['icon']} {mode['name']}", fill=(203, 213, 225), font=font_md)
-                    draw.text((165, y + 9), mode['badge'], fill=(100, 116, 139), font=get_font(10))
+                    draw.rounded_rectangle([(10, y), (230, y + 28)], radius=5, fill=(30, 41, 59), outline=(51, 65, 85))
+                    draw.text((18, y + 5), f"{mode['icon']} {mode['name']}", fill=(203, 213, 225), font=font_md)
+                    draw.text((165, y + 7), mode['badge'], fill=(100, 116, 139), font=get_font(9))
 
             # 底部按键提示
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((18, 296), "▲/▼:选择  OK:进入  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 📋 2. 会议待命 (IDLE 状态) =================
+        # ================= 🔑 2. NFC 智能门禁模式 (NFC 状态) =================
+        elif self.state == "NFC":
+            draw.rounded_rectangle([(42, 32), (198, 56)], radius=6, fill=(249, 115, 22))
+            draw.text((58, 36), "🔑 NFC 智能门禁通行", fill=(255, 255, 255), font=font_md)
+
+            if self.nfc_cards:
+                cur_card = self.nfc_cards[self.nfc_selected_index % len(self.nfc_cards)]
+                
+                # 拟真门禁卡片芯片面板
+                card_bg = (67, 56, 202) if not self.nfc_swiping else (16, 185, 129)
+                border_color = (129, 140, 248) if not self.nfc_swiping else (74, 222, 128)
+                draw.rounded_rectangle([(12, 64), (228, 215)], radius=12, fill=card_bg, outline=border_color, width=2)
+
+                # 芯片线圈与标题
+                draw.text((22, 74), "((( NFC ACCESS PASS )))", fill=(253, 224, 71), font=get_font(11))
+                draw.text((22, 94), cur_card.get("name", "智能门禁卡")[:13], fill=(255, 255, 255), font=font_md)
+                draw.text((22, 120), f"协议: {cur_card.get('type', 'ISO14443-A')}", fill=(226, 232, 240), font=font_sm)
+
+                # UID 芯片编号高亮展示
+                draw.rectangle([(20, 145), (220, 180)], fill=(15, 23, 42), outline=(250, 204, 21))
+                draw.text((26, 150), "卡片 UID (Chip ID):", fill=(148, 163, 184), font=get_font(10))
+                draw.text((26, 162), cur_card.get("uid", "8A:3F:12:C9"), fill=(56, 189, 248), font=font_md)
+
+                draw.text((22, 190), f"卡包序号: [{self.nfc_selected_index + 1}/{len(self.nfc_cards)}]", fill=(203, 213, 225), font=get_font(11))
+
+                # 刷卡动画或就绪提示
+                if self.nfc_swiping:
+                    draw.rectangle([(16, 224), (224, 275)], fill=(16, 185, 129), outline=(74, 222, 128))
+                    draw.text((32, 234), "🟢 刷卡成功！门禁已解锁", fill=(255, 255, 255), font=font_md)
+                    draw.text((45, 256), "射频发射中 · 欢迎通行", fill=(241, 245, 249), font=get_font(11))
+                else:
+                    draw.rectangle([(16, 224), (224, 275)], fill=(30, 41, 59), outline=(51, 65, 85))
+                    draw.text((32, 234), "📡 贴近读卡器感应区", fill=(250, 204, 21), font=font_md)
+                    draw.text((38, 256), "单击 [ OK ] 立即模拟刷卡", fill=(148, 163, 184), font=font_sm)
+
+            draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
+            draw.text((12, 296), "▲/▼:换卡  OK:刷卡开门  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
+
+        # ================= 📋 3. 会议待命 (IDLE 状态) =================
         elif self.state == "IDLE":
             draw.rounded_rectangle([(65, 38), (175, 66)], radius=6, fill=(59, 130, 246))
             draw.text((82, 43), "【 会议待命 】", fill=(255, 255, 255), font=font_md)
@@ -558,7 +672,7 @@ class CardBridge:
             draw.rectangle([(0, 290), (W, 320)], fill=(2, 6, 23))
             draw.text((32, 298), "OK: 录音  |  UP+DN: 选功能", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🎙️ 3. 正在录音 (RECORDING 状态) =================
+        # ================= 🎙️ 4. 正在录音 (RECORDING 状态) =================
         elif self.state == "RECORDING":
             elapsed = int(time.time() - self.record_start_time)
             mm, ss = divmod(elapsed, 60)
@@ -578,7 +692,7 @@ class CardBridge:
             draw.rectangle([(0, 290), (W, 320)], fill=(2, 6, 23))
             draw.text((25, 298), "OK: 结束录音 | UP+DN: 取消返回", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🧠 4. AI 提炼中 (PROCESSING 状态) =================
+        # ================= 🧠 5. AI 提炼中 (PROCESSING 状态) =================
         elif self.state == "PROCESSING":
             draw.rounded_rectangle([(50, 50), (190, 80)], radius=6, fill=(168, 85, 247))
             draw.text((68, 55), "【 AI 提炼中 】", fill=(255, 255, 255), font=font_md)
@@ -589,7 +703,7 @@ class CardBridge:
             draw.text((30, 210), "● 广播 12 大多机器人推送渠道", fill=(250, 204, 21), font=font_sm)
             draw.text((30, 240), "● 同步创建飞书 Docx 云文档", fill=(56, 189, 248), font=font_sm)
 
-        # ================= 📄 5. 纪要展示 (SUMMARIZED 状态) =================
+        # ================= 📄 6. 纪要展示 (SUMMARIZED 状态) =================
         elif self.state == "SUMMARIZED":
             draw.rounded_rectangle([(45, 32), (195, 56)], radius=4, fill=(16, 185, 129))
             draw.text((68, 36), "【 纪要已生成 】", fill=(255, 255, 255), font=font_md)
@@ -617,7 +731,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((16, 296), "▲/▼:切Todo  OK:重录  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🎯 6. 每日待办打卡模式 (TODO 状态) =================
+        # ================= 🎯 7. 每日待办打卡模式 (TODO 状态) =================
         elif self.state == "TODO":
             draw.rounded_rectangle([(45, 34), (195, 58)], radius=6, fill=(16, 185, 129))
             draw.text((62, 38), "🎯 每日待办打卡", fill=(255, 255, 255), font=font_md)
@@ -644,7 +758,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((12, 296), "▲/▼:选择  OK:打钩/取消  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= ⏳ 7. 专注番茄时钟 (POMODORO 状态) =================
+        # ================= ⏳ 8. 专注番茄时钟 (POMODORO 状态) =================
         elif self.state == "POMODORO":
             pomo_color = (239, 68, 68) if self.pomo_mode_type == "WORK" else (16, 185, 129)
             pomo_title = "⏳ 深度专注工作" if self.pomo_mode_type == "WORK" else "☕ 休息时间"
@@ -667,7 +781,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((8, 296), "OK:启停  ▲:切工/休  ▼:重置  UP+DN:菜单", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 💡 8. 语音灵感速记 (MEMO 状态) =================
+        # ================= 💡 9. 语音灵感速记 (MEMO 状态) =================
         elif self.state == "MEMO":
             draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=(245, 158, 11))
             draw.text((62, 41), "💡 语音灵感速记", fill=(255, 255, 255), font=font_md)
@@ -682,7 +796,7 @@ class CardBridge:
             draw.rectangle([(0, 288), (W, 320)], fill=(2, 6, 23))
             draw.text((25, 296), "OK: 录制速记  |  UP+DN: 选功能", fill=(148, 163, 184), font=font_sm)
 
-        # ================= 🔋 9. 硬件状态诊断 (STATUS 状态) =================
+        # ================= 🔋 10. 硬件状态诊断 (STATUS 状态) =================
         elif self.state == "STATUS":
             draw.rounded_rectangle([(45, 36), (195, 62)], radius=6, fill=(14, 165, 233))
             draw.text((62, 41), "🔋 硬件状态诊断", fill=(255, 255, 255), font=font_md)
@@ -709,6 +823,9 @@ class CardBridge:
             "mode": self.current_mode,
             "menu_selected_index": self.menu_selected_index,
             "battery_soc": self.battery_soc,
+            "nfc_cards": self.nfc_cards,
+            "nfc_selected_index": self.nfc_selected_index,
+            "nfc_swiping": self.nfc_swiping,
             "frame_b64": b64_png,
             "timestamp": time.time(),
         }
@@ -752,6 +869,9 @@ class CardBridge:
             "mode": self.current_mode,
             "modes_list": CARD_MODES,
             "menu_selected_index": self.menu_selected_index,
+            "nfc_cards": self.nfc_cards,
+            "nfc_selected_index": self.nfc_selected_index,
+            "nfc_swiping": self.nfc_swiping,
             "is_connected": len(self.clients) > 0,
             "connected_count": len(self.clients),
             "battery_soc": self.battery_soc,
@@ -769,6 +889,11 @@ class CardBridge:
             self.enter_menu()
             self.broadcast({"cmd": "combo_menu", "timestamp": time.time()})
             return {"code": 0, "msg": "已触发组合键，返回功能选择菜单", "data": self.get_screen_state()}
+
+        # NFC 刷卡开门
+        elif event_name in ["nfc_swipe", "swipe"]:
+            self.trigger_nfc_swipe()
+            return {"code": 0, "msg": "已触发 NFC 模拟刷卡通行", "data": self.get_screen_state()}
 
         # 向上 / 向下 / 确认
         elif event_name in ["key_up", "key_prev"]:

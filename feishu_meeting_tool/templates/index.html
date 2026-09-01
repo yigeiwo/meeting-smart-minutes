@@ -162,6 +162,7 @@
                   <select class="form-select form-select-sm" id="card-mode-selector" style="width: auto; font-size: 12px;" onchange="selectCardMode(this.value)">
                     <option value="menu">🎛️ 功能选择主菜单 (Menu)</option>
                     <option value="meeting" selected>📋 智能会议纪要 (Meeting)</option>
+                    <option value="nfc">🔑 NFC 智能门禁 (NFC Access)</option>
                     <option value="todo">🎯 每日待办打卡 (Todo)</option>
                     <option value="pomodoro">⏳ 专注番茄时钟 (Pomodoro)</option>
                     <option value="memo">💡 语音灵感速记 (Memo)</option>
@@ -186,7 +187,13 @@
                   <i class="bi bi-record-circle-fill text-danger me-1"></i>🎙️ 开始录音
                 </button>
                 <button class="btn btn-outline-danger btn-sm" type="button" onclick="triggerHardwareEvent('record_stop')">
-                  <i class="bi bi-stop-circle-fill me-1"></i>⏹️ 结束录音并总结
+                  <i class="bi bi-stop-circle-fill me-1"></i>⏹️ 结束录音
+                </button>
+                <button class="btn btn-outline-warning text-dark btn-sm fw-bold" type="button" onclick="triggerHardwareEvent('nfc_swipe')">
+                  <i class="bi bi-broadcast-pin text-danger me-1"></i>🔑 NFC 刷卡开门
+                </button>
+                <button class="btn btn-outline-info text-dark btn-sm" type="button" onclick="openNfcModal()">
+                  <i class="bi bi-credit-card-2-front-fill me-1"></i>门禁卡包
                 </button>
                 <button class="btn btn-primary btn-sm ms-auto" type="button" onclick="pushToHardwareCard()">
                   <i class="bi bi-send-fill me-1"></i>推送到胸卡
@@ -1718,6 +1725,10 @@
   // ================= 🌐 显式将所有前端核心函数挂载至 window 全局作用域 (杜绝任何上下文未定义问题) =================
   window.toggleBotEnabled = toggleBotEnabled;
   window.selectCardMode = selectCardMode;
+  window.openNfcModal = openNfcModal;
+  window.addNewNfcCard = addNewNfcCard;
+  window.deleteNfcCard = deleteNfcCard;
+  window.selectNfcCardByIndex = selectNfcCardByIndex;
   window.openWeChatLoginModal = openWeChatLoginModal;
   
   window.logoutWeChat = logoutWeChat;
@@ -3315,6 +3326,10 @@ ${err}`);
   // ================= 🌐 显式将所有前端核心函数挂载至 window 全局作用域 (杜绝任何上下文未定义问题) =================
   window.toggleBotEnabled = toggleBotEnabled;
   window.selectCardMode = selectCardMode;
+  window.openNfcModal = openNfcModal;
+  window.addNewNfcCard = addNewNfcCard;
+  window.deleteNfcCard = deleteNfcCard;
+  window.selectNfcCardByIndex = selectNfcCardByIndex;
   window.openWeChatLoginModal = openWeChatLoginModal;
   
   window.logoutWeChat = logoutWeChat;
@@ -3430,6 +3445,75 @@ ${err}`);
     </div>
   </div>
 </div>
+
+
+  <!-- 🔑 NFC 智能门禁卡包管理弹窗 -->
+  <div class="modal fade" id="nfcModal" tabindex="-1" aria-labelledby="nfcModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-warning bg-opacity-25 border-0 px-4 py-3">
+          <h5 class="modal-title fw-bold text-dark" id="nfcModalLabel">
+            <i class="bi bi-key-fill text-warning me-2"></i>🔑 AI Passport NFC 智能门禁卡包管理
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-4">
+          <div class="alert alert-info small d-flex align-items-center mb-4">
+            <i class="bi bi-info-circle-fill fs-5 me-3 text-primary"></i>
+            <div>
+              AI Passport 支持模拟与发射 <strong>ISO/IEC 14443-A (Mifare Classic 1K / Ultralight / Type-4)</strong> 门禁射频信号。
+              您可在此自定义添加公司大门、实验室、道闸等卡片 UID，并在胸卡上一键切换与刷卡通行！
+            </div>
+          </div>
+
+          <div class="row g-4">
+            <!-- 左侧: 卡包列表 -->
+            <div class="col-md-7">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="fw-bold small text-dark"><i class="bi bi-wallet2 me-1"></i>已绑定门禁卡包</span>
+                <button class="btn btn-outline-warning text-dark btn-sm py-0" type="button" onclick="triggerHardwareEvent('nfc_swipe')">
+                  <i class="bi bi-broadcast me-1"></i>即刻模拟刷卡
+                </button>
+              </div>
+              <div class="list-group" id="nfc-cards-list-group" style="max-height: 260px; overflow-y: auto;">
+                <div class="p-3 text-center text-muted small">加载中...</div>
+              </div>
+            </div>
+
+            <!-- 右侧: 添加新卡片 -->
+            <div class="col-md-5">
+              <div class="card p-3 bg-light border-0 rounded-3">
+                <h6 class="fw-bold mb-3 small text-dark"><i class="bi bi-plus-circle-fill text-success me-1"></i>录入新门禁卡</h6>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold mb-1">门禁名称 / 场景</label>
+                  <input type="text" class="form-control form-control-sm" id="new-nfc-name" placeholder="例如: 智能会议室 01">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold mb-1">卡片 UID (16进制 Hex)</label>
+                  <input type="text" class="form-control form-control-sm font-monospace" id="new-nfc-uid" placeholder="例如: 8A:3F:12:C9" value="8A:3F:12:C9">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold mb-1">射频芯片协议类型</label>
+                  <select class="form-select form-select-sm" id="new-nfc-type">
+                    <option value="Mifare Classic 1K" selected>Mifare Classic 1K (标准门禁)</option>
+                    <option value="ISO/IEC 14443A">ISO/IEC 14443A (高频通用)</option>
+                    <option value="Mifare Ultralight">Mifare Ultralight (轻量卡/车闸)</option>
+                    <option value="NFC Type-4 Tag">NFC Type-4 Tag (云打印/工位)</option>
+                  </select>
+                </div>
+                <button class="btn btn-success btn-sm w-100 fw-bold" type="button" onclick="addNewNfcCard()">
+                  <i class="bi bi-check-lg me-1"></i>保存并同步至卡片
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer bg-light border-0 px-4 py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>

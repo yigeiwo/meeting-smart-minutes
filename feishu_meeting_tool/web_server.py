@@ -584,6 +584,56 @@ async def set_card_mode(body: dict):
     return {"code": 0, "msg": f"卡片已切换至模式: {mode_id}", "data": get_card_bridge().get_screen_state()}
 
 
+@app.get("/api/nfc/cards")
+async def get_nfc_cards():
+    cb = get_card_bridge()
+    return {
+        "code": 0,
+        "data": {
+            "cards": cb.nfc_cards,
+            "selected_index": cb.nfc_selected_index,
+            "is_swiping": cb.nfc_swiping,
+        }
+    }
+
+
+@app.post("/api/nfc/cards")
+async def add_nfc_card(body: dict):
+    name = body.get("name", "未命名门禁卡")
+    uid = body.get("uid", "8A:3F:12:C9")
+    card_type = body.get("type", "Mifare Classic 1K")
+    cb = get_card_bridge()
+    new_card = cb.add_nfc_card(name, uid, card_type)
+    return {"code": 0, "msg": f"已成功添加门禁卡: {name}", "data": new_card}
+
+
+@app.delete("/api/nfc/cards/{card_id}")
+async def remove_nfc_card(card_id: str):
+    cb = get_card_bridge()
+    ok = cb.delete_nfc_card(card_id)
+    if ok:
+        return {"code": 0, "msg": "门禁卡已删除"}
+    return {"code": -1, "msg": "未找到指定卡片"}
+
+
+@app.post("/api/nfc/swipe")
+async def trigger_nfc_swipe_api():
+    cb = get_card_bridge()
+    cb.trigger_nfc_swipe()
+    return {"code": 0, "msg": "已触发 NFC 模拟刷卡通行", "data": cb.get_screen_state()}
+
+
+@app.post("/api/nfc/select")
+async def select_nfc_card_api(body: dict):
+    idx = body.get("index", 0)
+    cb = get_card_bridge()
+    if 0 <= idx < len(cb.nfc_cards):
+        cb.nfc_selected_index = idx
+        cb.render_and_send_frame()
+        return {"code": 0, "msg": "已切换选中的门禁卡", "data": cb.get_screen_state()}
+    return {"code": -1, "msg": "无效的卡片序号"}
+
+
 @app.post("/api/card/push")
 async def push_to_card(summary_data: dict):
     get_card_bridge().push_meeting_summary_to_card(summary_data)
