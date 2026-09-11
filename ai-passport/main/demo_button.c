@@ -10,18 +10,20 @@
 static lv_obj_t   *s_scr, *s_mv, *s_log;
 static lv_timer_t *s_timer;
 
+extern const lv_font_t font_chinese_14;
+
 #define LOG_LINES 6
 static char s_lines[LOG_LINES][32];
 static int  s_line_cnt;
 
-static const char *BTN_NAME[] = { "UP", "DOWN", "OK" };
-static const char *EV_NAME[]  = { "PRESS", "CLICK", "DOUBLE", "LONG" };
+static const char *BTN_NAME[] = { "上键", "下键", "确定键" };
+static const char *EV_NAME[]  = { "按下", "单击", "双击", "长按" };
 
 // 每 100ms 刷新一次电压。lv_timer 跑在 LVGL 任务里,已持有锁,可直接操作对象。
 static void tick(lv_timer_t *t) {
     (void)t;
     int mv = bsp_button_read_mv();
-    if (mv < 0) lv_label_set_text(s_mv, "ADC read failed");
+    if (mv < 0) lv_label_set_text(s_mv, "ADC读取失败");
     else        lv_label_set_text_fmt(s_mv, "%d mV", mv);
 }
 
@@ -43,7 +45,7 @@ static void log_push(const char *text) {
 
 void demo_button_enter(void) {
     s_line_cnt = 0;
-    s_scr = ui_pixel_screen_create("BUTTON / ADC");
+    s_scr = ui_pixel_screen_create("按键测试");
     lv_obj_t *panel = ui_pixel_panel_create(s_scr, 18, 58, 204, 184, UI_PAPER);
 
     s_mv = lv_label_create(panel);
@@ -53,9 +55,10 @@ void demo_button_enter(void) {
     lv_label_set_text(s_mv, "-- mV");
 
     s_log = lv_label_create(panel);
+    lv_obj_set_style_text_font(s_log, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_log, lv_color_hex(UI_INK), 0);
     lv_obj_align(s_log, LV_ALIGN_TOP_LEFT, 9, 54);
-    lv_label_set_text(s_log, "press any key...");
+    lv_label_set_text(s_log, "请按任意按键...");
 
     ui_pixel_mascot_create(s_scr, 101, 238);
 

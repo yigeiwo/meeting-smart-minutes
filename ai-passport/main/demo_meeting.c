@@ -132,7 +132,7 @@ static void update_ui(void) {
                 lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0xD97706), 0);
             }
             if (s_p1_timer) {
-                lv_label_set_text(s_p1_timer, "AI SYNC");
+                lv_label_set_text(s_p1_timer, "AI 提炼中");
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0xD97706), 0);
             }
             if (s_p1_content) {
@@ -141,7 +141,7 @@ static void update_ui(void) {
                     "生成结构化纪要同步飞书");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "请稍候，同步中...");
+                lv_label_set_text(s_p1_hint, "请稍候，同步处理中...");
             }
         } else if (s_state == MEETING_COMPLETED) {
             if (s_p1_badge) {
@@ -149,7 +149,7 @@ static void update_ui(void) {
                 lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0x2563EB), 0);
             }
             if (s_p1_timer) {
-                lv_label_set_text(s_p1_timer, "DONE");
+                lv_label_set_text(s_p1_timer, "已完成");
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0x2563EB), 0);
             }
             if (s_p1_content) {
@@ -172,13 +172,13 @@ static void update_ui(void) {
             lv_label_set_text(s_p2_url, "http://192.168.0.214:8000");
         }
         if (s_p2_port) {
-            lv_label_set_text(s_p2_port, "硬件端口: TCP 5566");
+            lv_label_set_text(s_p2_port, "通信端口: TCP 5566");
         }
         if (s_p2_mac) {
             lv_label_set_text_fmt(s_p2_mac, "设备硬件: %s", s_mac_str);
         }
         if (s_p2_status) {
-            lv_label_set_text(s_p2_status, "状态: 在线已连接");
+            lv_label_set_text(s_p2_status, "服务状态: 在线已连接");
         }
     } else if (s_cur_page == 2) {
         // --- 第 3 页更新 (真实多维表格同步状态，严禁模拟假数据) ---
@@ -187,7 +187,7 @@ static void update_ui(void) {
             lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x7C3AED), 0);
         }
         if (s_p3_title) {
-            lv_label_set_text(s_p3_title, "FEISHU BITABLE");
+            lv_label_set_text(s_p3_title, "飞书多维表格待办");
         }
         if (s_p3_content) {
             lv_label_set_text(s_p3_content,
@@ -245,7 +245,7 @@ static void meeting_record_task(void *arg) {
 }
 
 void demo_meeting_enter(void) {
-    s_scr = ui_pixel_screen_create("FEISHU");
+    s_scr = ui_pixel_screen_create("飞书会议");
 
     // 读取芯片硬件 STA MAC 地址
     uint8_t mac[6] = {0};
@@ -328,7 +328,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *p2_prompt = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(p2_prompt, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p2_prompt, lv_color_hex(0x475569), 0);
-    lv_label_set_text(p2_prompt, "电脑控制台:");
+    lv_label_set_text(p2_prompt, "电脑控制台地址:");
     lv_obj_align(p2_prompt, LV_ALIGN_TOP_MID, 0, 50);
 
     s_p2_url = lv_label_create(s_page[1]);
@@ -340,7 +340,7 @@ void demo_meeting_enter(void) {
     s_p2_port = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(s_p2_port, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p2_port, lv_color_hex(0x334155), 0);
-    lv_label_set_text(s_p2_port, "硬件端口: TCP 5566");
+    lv_label_set_text(s_p2_port, "通信端口: TCP 5566");
     lv_obj_align(s_p2_port, LV_ALIGN_TOP_MID, 0, 90);
 
     s_p2_mac = lv_label_create(s_page[1]);
@@ -352,13 +352,13 @@ void demo_meeting_enter(void) {
     s_p2_status = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(s_p2_status, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x16A34A), 0);
-    lv_label_set_text(s_p2_status, "状态: 在线已连接");
+    lv_label_set_text(s_p2_status, "服务状态: 在线已连接");
     lv_obj_align(s_p2_status, LV_ALIGN_TOP_MID, 0, 134);
 
     lv_obj_t *p2_hint = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(p2_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p2_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p2_hint, "请打开电脑浏览器配对");
+    lv_label_set_text(p2_hint, "请在电脑浏览器打开控制台");
     lv_obj_align(p2_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
@@ -382,9 +382,9 @@ void demo_meeting_enter(void) {
     lv_obj_align(s_p3_badge, LV_ALIGN_TOP_MID, 0, 28);
 
     s_p3_title = lv_label_create(s_page[2]);
-    lv_obj_set_style_text_font(s_p3_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_p3_title, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p3_title, lv_color_hex(0x7C3AED), 0);
-    lv_label_set_text(s_p3_title, "FEISHU BITABLE");
+    lv_label_set_text(s_p3_title, "飞书多维表格待办");
     lv_obj_align(s_p3_title, LV_ALIGN_TOP_MID, 0, 50);
 
     s_p3_content = lv_label_create(s_page[2]);

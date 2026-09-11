@@ -100,10 +100,9 @@ static void sleep_task(void *arg)
     }
 }
 
-void demo_low_power_enter(void)
-{
-    s_scr = ui_pixel_screen_create("LOW POWER");
-    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 14, 54, 212, 190, UI_PAPER);
+void demo_low_power_enter(void) {
+    s_scr = ui_pixel_screen_create("低功耗");
+    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 18, 58, 204, 184, UI_PAPER);
     s_status = lv_label_create(panel);
     lv_obj_set_width(s_status, 184);
     lv_obj_set_style_text_align(s_status, LV_TEXT_ALIGN_CENTER, 0);

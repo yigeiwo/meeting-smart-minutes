@@ -176,10 +176,9 @@ static void wifi_stop(void)
     s_state = WIFI_DEMO_OFF;
 }
 
-void demo_wifi_enter(void)
-{
-    s_scr = ui_pixel_screen_create("WI-FI SCAN");
-    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 12, 54, 216, 190, UI_PAPER);
+void demo_wifi_enter(void) {
+    s_scr = ui_pixel_screen_create("无线网络");
+    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 18, 58, 204, 184, UI_PAPER);
 
     s_status = lv_label_create(panel);
     lv_obj_set_width(s_status, 190);

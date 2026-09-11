@@ -95,7 +95,7 @@ static void audio_task(void *arg) {
 }
 
 void demo_audio_enter(void) {
-    s_scr = ui_pixel_screen_create("AUDIO");
+    s_scr = ui_pixel_screen_create("音频测试");
     lv_obj_t *panel = ui_pixel_panel_create(s_scr, 18, 62, 204, 168, UI_PAPER);
 
     lv_obj_t *record = ui_pixel_panel_create(panel, 58, 12, 72, 72, UI_INK);

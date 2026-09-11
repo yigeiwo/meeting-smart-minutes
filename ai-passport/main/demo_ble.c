@@ -192,8 +192,8 @@ static void tick(lv_timer_t *timer)
 
 void demo_ble_enter(void)
 {
-    s_scr = ui_pixel_screen_create("BLUETOOTH LE");
-    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 22, 58, 196, 180, UI_PAPER);
+    s_scr = ui_pixel_screen_create("蓝牙广播");
+    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 18, 58, 204, 184, UI_PAPER);
     s_status = lv_label_create(panel);
     lv_obj_set_width(s_status, 168);
     lv_obj_set_style_text_align(s_status, LV_TEXT_ALIGN_CENTER, 0);
