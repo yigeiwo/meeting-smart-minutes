@@ -31,7 +31,7 @@ def main():
 
     # 1. Web
     web_parser = subparsers.add_parser("web", help="启动 Web 工作台与硬件桥接服务")
-    web_parser.add_argument("--host", default="127.0.0.1", help="Web 监听地址")
+    web_parser.add_argument("--host", default="0.0.0.0", help="Web 监听地址 (0.0.0.0 允许局域网访问)")
     web_parser.add_argument("--port", type=int, default=8000, help="Web 端口")
     web_parser.add_argument("--bridge-port", type=int, default=5566, help="AI Passport 桥接端口")
 
@@ -60,12 +60,23 @@ def main():
     args = parser.parse_args()
 
     if not args.command or args.command == "web":
-        host = getattr(args, "host", "127.0.0.1")
+        host = getattr(args, "host", "0.0.0.0")
         port = getattr(args, "port", 8000)
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "127.0.0.1"
+
         print("=======================================================")
         print("[INFO] 飞书会议智能妙记总结系统正在启动...")
-        print(f"[URL]  Web 工作台: http://{host}:{port}")
-        print(f"[PORT] AI Passport 硬件桥接端口: 5566")
+        print(f"[URL]  本地控制台: http://127.0.0.1:{port}")
+        if local_ip != "127.0.0.1":
+            print(f"[URL]  局域网控制台: http://{local_ip}:{port}")
+        print(f"[PORT] AI Passport 硬件桥接端口: 5566 (TCP)")
         print("=======================================================")
         uvicorn.run("feishu_meeting_tool.web_server:app", host=host, port=port, reload=False)
 
