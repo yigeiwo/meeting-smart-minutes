@@ -1,10 +1,27 @@
-# ��������Զ�����ܽṤ�� �����嵥
+# 飞书会议自动妙记总结工具 依赖清单
+# --- Web 框架 ---
 fastapi>=0.100.0
 uvicorn>=0.22.0
-requests>=2.28.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
-openai>=1.0.0
 jinja2>=3.1.0
 python-multipart>=0.0.6
+pydantic>=2.0.0
+
+# --- 配置与网络 ---
+python-dotenv>=1.0.0
+requests>=2.28.0
+
+# --- AI 大模型中转 ---
+openai>=1.0.0
+
+# --- 硬件胸卡画面渲染 (card_bridge 需要 PIL 生成 240x320 LCD 帧) ---
+pillow>=10.0.0
+
+# --- 数据库 (PostgreSQL 企业库与 SQLite 回退) ---
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+
+# --- 机器人长连接 ---
+websockets>=12.0
+
+# --- 测试 ---
 pytest>=7.0.0

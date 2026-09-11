@@ -182,8 +182,12 @@
     </form>
 
     <div class="bottom-links">
+      {% if allow_register %}
       <span>还没有账号？</span>
       <a href="/register">立即注册新账号 <i class="bi bi-arrow-right-short"></i></a>
+      {% else %}
+      <span>本系统不开放自助注册，账号请联系管理员创建</span>
+      {% endif %}
     </div>
   </div>
 </div>

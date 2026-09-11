@@ -45,6 +45,14 @@
       <span class="me-3 small"><span class="status-indicator status-online me-1"></span> 飞书网关: 就绪</span>
       <span class="me-3 small"><span class="status-indicator status-online me-1"></span> AI 引擎: <strong id="top-current-model" class="text-warning">DeepSeek</strong></span>
       <span class="me-3 small"><span class="status-indicator status-online me-1"></span> 端口: <span id="top-web-port">8000</span> / 5566</span>
+
+      <!-- NFC 碰一碰入口 -->
+      <a href="/nfc" target="_blank" class="btn btn-sm btn-outline-warning me-3 d-inline-flex align-items-center" title="查看/写入胸卡背面 NFC 标签">
+        <i class="bi bi-broadcast-pin me-1"></i>NFC 碰一碰
+      </a>
+      <a href="/wifi" target="_blank" class="btn btn-sm btn-outline-info me-3 d-inline-flex align-items-center" title="蓝牙配网页">
+        <i class="bi bi-bluetooth me-1"></i>蓝牙配网
+      </a>
       
       <!-- 用户状态与退出登录 -->
       <div class="dropdown" id="user-dropdown-container">
@@ -58,7 +66,7 @@
             <div class="text-muted small" id="user-dropdown-email">admin@feishu.company</div>
             <span class="badge bg-primary text-white mt-1" id="user-role-label">👑 系统管理员</span>
           </li>
-          <li><a class="dropdown-item py-2" href="/register"><i class="bi bi-person-plus me-2 text-primary"></i>注册新账号</a></li>
+          {% if allow_register %}<li><a class="dropdown-item py-2" href="/register"><i class="bi bi-person-plus me-2 text-primary"></i>注册新账号</a></li>{% endif %}
           <li><a class="dropdown-item py-2" href="/login"><i class="bi bi-arrow-repeat me-2 text-secondary"></i>切换登录账号</a></li>
           <li><hr class="dropdown-divider my-1"></li>
           <li><a class="dropdown-item py-2 text-danger" href="javascript:void(0)" onclick="handleLogout()"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>
@@ -1605,27 +1613,52 @@
               <i class="bi bi-badge-ad text-warning me-2"></i>4. AI Passport (ESP32-C3) 智能硬件胸卡配网与联调
             </h5>
             
+            <p class="small text-muted">胸卡固件<strong>不运行 HTTP 服务器</strong>：网页配网界面由本工作台（默认 8000 端口）提供，胸卡侧仅运行 BLE 蓝牙配网服务与 Wi-Fi STA 管理。配网地址为 <a href="/wifi" target="_blank"><code>/wifi</code></a>。</p>
+
             <div class="row g-3">
               <div class="col-md-6">
                 <div class="p-3 border rounded bg-light h-100 small">
-                  <h6 class="fw-bold text-dark"><i class="bi bi-wifi text-primary me-1"></i>首次配网与连接服务端</h6>
-                  <ol class="mb-0 ps-3 text-muted">
-                    <li>长按胸卡侧边电源键 3 秒开机；</li>
-                    <li>手机连接胸卡热点 <code>AI-Passport-Setup</code>；</li>
-                    <li>浏览器打开 <code>http://192.168.4.1</code>；</li>
-                    <li>输入 Wi-Fi 密码，服务器 IP 填电脑局域网 IP (如 <code>192.168.1.100</code>)，端口填 <code>5566</code>；</li>
-                    <li>保存重启后，工作台首页将自动亮起绿色在线指示。</li>
+                  <h6 class="fw-bold text-dark"><i class="bi bi-bluetooth text-primary me-1"></i>方式一：手机蓝牙 (BLE) 一键配网</h6>
+                  <ol class="mb-2 ps-3 text-muted">
+                    <li>用 Chrome / Edge 等支持 Web Bluetooth 的浏览器打开配网页 <a href="/wifi" target="_blank"><code>/wifi</code></a>（手机访问请用电脑局域网 IP，如 <code>http://192.168.1.100:8000/wifi</code>）；</li>
+                    <li>点击<b>【连接蓝牙设备】</b>，在浏览器弹窗中选择胸卡设备 <code>FoloPassport</code>；</li>
+                    <li>填入 <b>2.4GHz</b> Wi-Fi 名称与密码；<b>工作台地址会自动填入本页的电脑局域网 IP</b>（可修改），端口默认 <code>5566</code>；</li>
+                    <li>点击<b>【下发配网】</b>，胸卡会同时收到 Wi-Fi 凭据与工作台地址；</li>
+                    <li>配网成功后胸卡<b>自动连接工作台 5566 端口</b>，工作台硬件视窗随即显示「已连接」；</li>
+                    <li>凭据与工作台地址一并写入胸卡 NVS，<b>下次开机自动回连</b>，无需重复配网。</li>
                   </ol>
+                  <div class="text-muted" style="font-size: .78rem; line-height: 1.5;">
+                    BLE GATT：Service <code>0xFFF0</code> / 写特征 <code>0xFFF1</code> / 通知+读取特征 <code>0xFFF2</code>；
+                    下发报文为 <code>{"ssid":"..","pwd":"..","host":"192.168.1.100","port":5566}</code>，
+                    状态码 <code>1</code>=连接中、<code>2</code>=成功、<code>3</code>=失败（密码错误或信号差）。
+                  </div>
+                  <div class="alert alert-primary py-2 px-2 mt-2 mb-0" style="font-size: .78rem;">
+                    <b>打通后的完整闭环：</b>胸卡按 OK 开始录音 → 麦克风 PCM 实时上行并在工作台落盘为
+                    <code>records/card_*.wav</code> → 停止录音后自动跑真实 AI 流水线（转写 / 大模型提炼 /
+                    创建飞书云文档 / 多机器人广播）→ 结果回推胸卡，屏幕显示真实纪要标题、云文档状态与待办清单。
+                    链路断开、提炼失败、超时未返回等都会如实回显在胸卡屏幕上，不会伪造成功。
+                  </div>
                 </div>
               </div>
               <div class="col-md-6">
                 <div class="p-3 border rounded bg-light h-100 small">
-                  <h6 class="fw-bold text-dark"><i class="bi bi-arrow-repeat text-danger me-1"></i>重置 Wi-Fi 无线配置</h6>
-                  <ul class="mb-0 ps-3 text-muted">
-                    <li><strong>物理按键重置</strong>：开机状态下<strong>长按【OK 键】5~8 秒</strong>，屏幕提示 <code>Resetting Wi-Fi...</code> 后自动进入 AP 配网模式；</li>
-                    <li><strong>组合开机</strong>：关机状态下按住【OK 键】不放，同时长按【电源键】开机；</li>
-                    <li><strong>串口重置</strong>：连接 Type-C 串口发送 <code>reset_wifi</code>。</li>
-                  </ul>
+                  <h6 class="fw-bold text-dark"><i class="bi bi-nfc text-danger me-1"></i>方式二：NFC 碰一碰直达配网页
+                    <a href="/nfc" target="_blank" class="btn btn-sm btn-outline-warning ms-2 py-0 px-2" style="font-size:.72rem;">打开 NFC 专页</a>
+                  </h6>
+                  <ol class="mb-2 ps-3 text-muted">
+                    <li>手机安装免费 App <b>NFC Tools</b>（各大应用商店均可免费下载）；</li>
+                    <li>打开 NFC Tools &gt; <b>【写】</b> &gt; <b>【添加记录】</b> &gt; 选择<b>【网址 / URL】</b>；</li>
+                    <li>输入配网页地址 <code>http://&lt;电脑局域网IP&gt;:8000/wifi</code>，点击<b>【写入】</b>；</li>
+                    <li>将手机背面贴近胸卡背面的 NFC 区域，提示写入成功即完成；</li>
+                    <li>此后手机碰一下胸卡背面，就会直接弹出本配网页。</li>
+                  </ol>
+                  <div class="alert alert-warning py-2 px-2 mb-2" style="font-size: .78rem;">
+                    <b>碰一碰打开的却不是配网页？</b><br>
+                    胸卡背面为被动 <code>NTAG213</code> 标签（无供电、无固件接口），碰一碰打开哪个页面<strong>完全由标签内写入的 URL 决定</strong>。若当前打开的是设备二维码等无关链接，请按上述步骤用 NFC Tools 重新写入配网页地址覆盖即可。
+                  </div>
+                  <div class="text-muted" style="font-size: .78rem; line-height: 1.5;">
+                    <b>重新配网 / 更换 Wi-Fi：</b>再次在配网页下发新的名称与密码即会<strong>覆盖</strong>胸卡 NVS 中保存的凭据，无需额外的重置操作。
+                  </div>
                 </div>
               </div>
             </div>

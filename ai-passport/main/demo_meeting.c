@@ -4,6 +4,7 @@
 #include "bsp_display.h"
 #include "bsp_battery.h"
 #include "ui_pixel.h"
+#include "card_link.h"
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -44,12 +45,11 @@ static lv_obj_t   *s_p1_timer = NULL;
 static lv_obj_t   *s_p1_content = NULL;
 static lv_obj_t   *s_p1_hint = NULL;
 
-// 第 2 页控件 (配对连接与网络看板)
+// 第 2 页控件 (蓝牙配网与工作台链路)
 static lv_obj_t   *s_p2_badge = NULL;
-static lv_obj_t   *s_p2_url = NULL;
-static lv_obj_t   *s_p2_port = NULL;
-static lv_obj_t   *s_p2_mac = NULL;
-static lv_obj_t   *s_p2_status = NULL;
+static lv_obj_t   *s_p2_url = NULL;      // 工作台服务端地址 host:port
+static lv_obj_t   *s_p2_mac = NULL;      // 蓝牙配网服务名
+static lv_obj_t   *s_p2_status = NULL;   // 桥接真实收发计数
 
 // 第 3 页控件 (飞书多维表格与待办)
 static lv_obj_t   *s_p3_badge = NULL;
@@ -59,11 +59,72 @@ static lv_obj_t   *s_p3_content = NULL;
 static TaskHandle_t s_rec_task = NULL;
 static volatile meeting_state_t s_state = MEETING_IDLE;
 static uint32_t s_rec_seconds = 0;
-static char s_mac_str[24] = "4C:11:AE:30:DE:3C";
+
+// 提炼等待计时 (真实等待工作台回推结果, 超时如实提示而非伪造成功)
+static uint32_t s_processing_seconds = 0;
+#define PROCESSING_TIMEOUT_SEC   180
+
+// 最近一次真实失败原因 (来自工作台如实回传), 空串表示无
+static char s_err_note[CARD_LINK_ERR_LEN] = {0};
+
+// 测量一段 UTF-8 文本使用中文字体时的单行像素宽。
+// LVGL 9 移除了 lv_txt_get_width, 统一用 lv_text_get_size (返回像素尺寸)。
+static lv_coord_t text_width_px(const char *s)
+{
+    lv_point_t sz = {0, 0};
+    lv_text_get_size(&sz, s, &font_chinese_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return sz.x;
+}
+
+// 按 UTF-8 安全地把 src 截断到 max_w 像素宽, 超出则追加 ".."
+static void fit_text(const char *src, char *dst, size_t dst_size, lv_coord_t max_w)
+{
+    if (!src || !dst || dst_size == 0) return;
+    dst[0] = '\0';
+    if (!src[0]) return;
+
+    size_t n = strlen(src);
+    if (n >= dst_size) n = dst_size - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+    if (text_width_px(dst) <= max_w) {
+        return;
+    }
+
+    // 逐字符回退, 保证不切断 UTF-8 多字节序列
+    for (size_t cut = n; cut > 0; cut--) {
+        if ((src[cut - 1] & 0xC0) == 0x80) continue;      // 落在续字节上, 继续回退
+        char tmp[CARD_LINK_ITEM_LEN + 8];
+        size_t take = cut < sizeof(tmp) - 3 ? cut : sizeof(tmp) - 3;
+        memcpy(tmp, src, take);
+        tmp[take] = '\0';
+        strcat(tmp, "..");
+        if (text_width_px(tmp) <= max_w) {
+            snprintf(dst, dst_size, "%s", tmp);
+            return;
+        }
+    }
+    dst[0] = '\0';
+}
+
+// 生成第 1 页提示行文案 (长按上键返回菜单由 main.c 全局拦截)
+static const char *hint_idle(void)  { return "长按上键 菜单  下键 换页"; }
+static const char *hint_rec(void)   { return "中键 结束录音  下键 换页"; }
+static const char *hint_done(void)  { return "中键 再次录音  下键 换页"; }
+static const char *hint_proc(void)  { return "请稍候 同步处理中..."; }
+
+static void on_card_link_event(card_link_event_t ev, void *user);
 
 static void update_battery(void) {
     if (!s_bat_label) return;
     int soc = bsp_battery_soc();
+
+    // 电量真实变化时同步给工作台 (不做周期刷屏, 只在变化时上报)
+    static int s_last_sent_soc = -999;
+    if (soc != s_last_sent_soc) {
+        s_last_sent_soc = soc;
+        if (soc >= 0) card_link_send_battery(soc);
+    }
 
     if (soc < 0) {
         lv_label_set_text(s_bat_label, "100%");
@@ -93,8 +154,13 @@ static void update_ui(void) {
         // --- 第 1 页更新 (真实会议录音与纪要状态) ---
         if (s_state == MEETING_IDLE) {
             if (s_p1_badge) {
-                lv_label_set_text(s_p1_badge, "[待命] 飞书开放平台网关就绪");
-                lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0x059669), 0);
+                if (card_link_is_connected()) {
+                    lv_label_set_text(s_p1_badge, "[在线] 已连接工作台");
+                    lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0x059669), 0);
+                } else {
+                    lv_label_set_text_fmt(s_p1_badge, "[待命] %s", card_link_state_text());
+                    lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0xD97706), 0);
+                }
             }
             if (s_p1_timer) {
                 lv_obj_set_style_text_font(s_p1_timer, &lv_font_montserrat_20, 0);
@@ -103,12 +169,16 @@ static void update_ui(void) {
                 lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
-                lv_label_set_text(s_p1_content,
+                lv_label_set_text_fmt(s_p1_content,
                     "飞书会议智能妙记\n"
-                    "按 OK 键开始实时会议录音");
+                    "按 OK 键开始录音\n"
+                    "%s\n"
+                    "自动提炼并同步飞书",
+                    card_link_is_connected() ? "录音实时上行至工作台"
+                                             : "未连接工作台 暂不上行");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "上键: 菜单   中键: 录音   下键: 换板");
+                lv_label_set_text(s_p1_hint, hint_idle());
             }
         } else if (s_state == MEETING_RECORDING) {
             if (s_p1_badge) {
@@ -124,31 +194,54 @@ static void update_ui(void) {
                 lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
-                lv_label_set_text(s_p1_content,
+                lv_label_set_text_fmt(s_p1_content,
                     "正在录制会议讨论发言\n"
-                    "音频流式推送到云端网关");
+                    "%s\n"
+                    "录音时长已在下方显示\n"
+                    "长按上键可返回菜单",
+                    card_link_is_connected() ? "音频实时上行至工作台"
+                                             : "未连接工作台 暂不上行");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "中键: 结束录音   下键: 换板");
+                lv_label_set_text(s_p1_hint, hint_rec());
             }
         } else if (s_state == MEETING_PROCESSING) {
+            bool failed = (s_err_note[0] != '\0');
             if (s_p1_badge) {
-                lv_label_set_text(s_p1_badge, "[提炼] 飞书智能妙记处理中");
-                lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0xD97706), 0);
+                lv_label_set_text(s_p1_badge, failed ? "[异常] 本次提炼未完成"
+                                                    : "[提炼] 飞书智能妙记处理中");
+                lv_obj_set_style_text_color(s_p1_badge,
+                    lv_color_hex(failed ? 0xDC2626 : 0xD97706), 0);
             }
             if (s_p1_timer) {
                 lv_obj_set_style_text_font(s_p1_timer, &font_chinese_14, 0);
-                lv_label_set_text(s_p1_timer, "AI 提炼决议生成中...");
-                lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0xD97706), 0);
+                lv_label_set_text(s_p1_timer,
+                    failed ? "已停止 等待重新录音" : "AI 提炼决议生成中...");
+                lv_obj_set_style_text_color(s_p1_timer,
+                    lv_color_hex(failed ? 0xDC2626 : 0xD97706), 0);
                 lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
-                lv_label_set_text(s_p1_content,
-                    "正在调用大模型提炼决议\n"
-                    "生成结构化纪要同步飞书");
+                if (failed) {
+                    char note[CARD_LINK_ERR_LEN + 8] = {0};
+                    fit_text(s_err_note, note, sizeof(note), 196);
+                    lv_label_set_text_fmt(s_p1_content,
+                        "工作台未完成本次提炼\n"
+                        "%s\n"
+                        "可重新按 OK 键录音\n"
+                        "长按上键可返回菜单", note);
+                } else {
+                    lv_label_set_text_fmt(s_p1_content,
+                        "录音已上行至工作台\n"
+                        "正在转写并调用大模型\n"
+                        "生成纪要 待办与云文档\n"
+                        "%s",
+                        card_link_is_connected() ? "请稍候 完成后自动显示"
+                                                 : "链路中断 请检查网络");
+                }
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "请稍候，同步处理中...");
+                lv_label_set_text(s_p1_hint, failed ? "中键 重新录音  下键 换页" : hint_proc());
             }
         } else if (s_state == MEETING_COMPLETED) {
             if (s_p1_badge) {
@@ -158,77 +251,107 @@ static void update_ui(void) {
             if (s_p1_timer) {
                 // 使用中文字体显示录音总时长与已完成状态，彻底解决中间几个字空白不显示的问题
                 lv_obj_set_style_text_font(s_p1_timer, &font_chinese_14, 0);
-                lv_label_set_text_fmt(s_p1_timer, "会议总时长 %02lu:%02lu (已完成)", 
+                lv_label_set_text_fmt(s_p1_timer, "会议时长 %02lu:%02lu (完成)", 
                                       (unsigned long)(s_rec_seconds / 60), 
                                       (unsigned long)(s_rec_seconds % 60));
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0x2563EB), 0);
                 lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
-                lv_label_set_text(s_p1_content,
-                    "会议纪要已生成并推送！\n"
-                    "已同步至飞书云文档与群");
+                card_link_summary_t sum;
+                if (card_link_get_summary(&sum)) {
+                    // 全部为工作台真实回推的数据: 纪要标题 / 待办数 / 决议数 / 云文档是否生成
+                    char title[CARD_LINK_ITEM_LEN + 8] = {0};
+                    fit_text(sum.title, title, sizeof(title), 196);
+                    lv_label_set_text_fmt(s_p1_content,
+                        "%s\n"
+                        "待办 %u 项 决议 %u 项\n"
+                        "%s\n"
+                        "下键 查看待办清单",
+                        title,
+                        (unsigned)sum.todo_count,
+                        (unsigned)sum.decision_count,
+                        sum.doc_url[0] ? "飞书云文档已生成" : "云文档暂未生成");
+                } else {
+                    lv_label_set_text(s_p1_content,
+                        "工作台已结束本次处理\n"
+                        "没有收到纪要回推\n"
+                        "可重新按 OK 键录音\n"
+                        "长按上键可返回菜单");
+                }
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "上键: 菜单   中键: 再次录音   下键: 换板");
+                lv_label_set_text(s_p1_hint, hint_done());
             }
         }
     } else if (s_cur_page == 1) {
-        char ip[32] = {0};
-        char ssid[34] = {0};
-        bool connected = ble_prov_is_wifi_connected();
-        ble_prov_get_ip_str(ip, sizeof(ip));
-        ble_prov_get_ssid_str(ssid, sizeof(ssid));
+        // --- 第 2 页更新 (真实配网 + 真实 5566 桥接链路状态，严禁模拟假数据) ---
+        char host[64] = {0};
+        ble_prov_get_server_host(host, sizeof(host));
 
         if (s_p2_badge) {
-            if (connected) {
-                lv_label_set_text(s_p2_badge, "[网络] 无线网络已连接");
+            if (card_link_is_connected()) {
+                lv_label_set_text(s_p2_badge, "[链路] 已连接工作台");
                 lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0x059669), 0);
             } else {
-                lv_label_set_text(s_p2_badge, "[网络] 等待手机NFC/BLE配网");
+                lv_label_set_text_fmt(s_p2_badge, "[链路] %s", card_link_state_text());
                 lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0xD97706), 0);
             }
         }
-        if (s_p2_url) {
-            if (connected && strlen(ip) > 0) {
-                lv_label_set_text_fmt(s_p2_url, "http://%s:8000", ip);
-            } else {
-                lv_label_set_text(s_p2_url, "http://192.168.0.214:8000/wifi");
-            }
-        }
-        if (s_p2_port) {
-            if (connected && strlen(ssid) > 0) {
-                lv_label_set_text_fmt(s_p2_port, "热点: %s (已联网)", ssid);
-            } else {
-                lv_label_set_text(s_p2_port, "蓝牙广播: FoloPassport");
-            }
-        }
+        // 蓝牙配网服务名: 固件真实广播的 BLE 设备名 (ble_prov.c DEVICE_NAME)
         if (s_p2_mac) {
-            lv_label_set_text_fmt(s_p2_mac, "设备硬件: %s", s_mac_str);
+            lv_label_set_text(s_p2_mac, "FoloPassport");
         }
-        if (s_p2_status) {
-            if (connected) {
-                lv_label_set_text(s_p2_status, "服务状态: 在线已连接");
-                lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x16A34A), 0);
+        // 工作台服务端地址: 由配网页真实下发, 未下发时如实提示
+        if (s_p2_url) {
+            if (host[0]) {
+                lv_label_set_text_fmt(s_p2_url, "%s:%u", host, (unsigned)ble_prov_get_server_port());
             } else {
-                lv_label_set_text(s_p2_status, "配网状态: 蓝牙可连接待下发");
-                lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x2563EB), 0);
+                lv_label_set_text(s_p2_url, "未下发地址");
             }
+        }
+        // 5566 桥接真实收发计数: 直接佐证链路确实在交换数据
+        if (s_p2_status) {
+            lv_label_set_text_fmt(s_p2_status, "上行 %u 下行 %u",
+                                  (unsigned)card_link_tx_lines(),
+                                  (unsigned)card_link_rx_lines());
+            lv_obj_set_style_text_color(s_p2_status,
+                lv_color_hex(card_link_is_connected() ? 0x16A34A : 0x94A3B8), 0);
         }
     } else if (s_cur_page == 2) {
-        // --- 第 3 页更新 (真实多维表格同步状态，严禁模拟假数据) ---
+        // --- 第 3 页更新 (工作台真实回推的待办清单，严禁模拟假数据) ---
+        card_link_summary_t sum;
+        bool has = card_link_get_summary(&sum);
+
         if (s_p3_badge) {
-            lv_label_set_text(s_p3_badge, "[待办] 飞书多维表格同步");
-            lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x7C3AED), 0);
+            if (has) {
+                lv_label_set_text_fmt(s_p3_badge, "[待办] 已同步 %u 项", (unsigned)sum.todo_count);
+                lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x059669), 0);
+            } else {
+                lv_label_set_text(s_p3_badge, "[待办] 等待本次会议纪要");
+                lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x7C3AED), 0);
+            }
         }
         if (s_p3_title) {
             lv_label_set_text(s_p3_title, "飞书多维表格待办");
         }
         if (s_p3_content) {
-            lv_label_set_text(s_p3_content,
-                "暂无待办事项记录\n"
-                "请按 OK 键开始会议录音\n"
-                "自动提炼并同步到飞书");
+            if (has && sum.todo_count > 0) {
+                char l1[CARD_LINK_ITEM_LEN + 8] = {0};
+                char l2[CARD_LINK_ITEM_LEN + 8] = {0};
+                char l3[CARD_LINK_ITEM_LEN + 8] = {0};
+                fit_text(sum.todos[0], l1, sizeof(l1), 196);
+                if (sum.todo_count > 1) fit_text(sum.todos[1], l2, sizeof(l2), 196);
+                if (sum.todo_count > 2) fit_text(sum.todos[2], l3, sizeof(l3), 196);
+                if (l3[0])      lv_label_set_text_fmt(s_p3_content, "%s\n%s\n%s", l1, l2, l3);
+                else if (l2[0]) lv_label_set_text_fmt(s_p3_content, "%s\n%s", l1, l2);
+                else            lv_label_set_text(s_p3_content, l1);
+            } else {
+                lv_label_set_text(s_p3_content,
+                    "暂无待办事项记录\n"
+                    "请按 OK 键开始录音\n"
+                    "自动提炼并同步到飞书");
+            }
         }
     }
 
@@ -252,6 +375,19 @@ static void show_page(int page_idx) {
 
 static void on_tick_timer(lv_timer_t *timer) {
     (void)timer;
+
+    // 提炼等待超时保护: 真实链路拿不到结果时如实提示, 绝不伪造"已同步"
+    if (s_state == MEETING_PROCESSING && s_err_note[0] == '\0') {
+        s_processing_seconds++;
+        if (!card_link_is_connected()) {
+            if (s_processing_seconds >= 10) {
+                snprintf(s_err_note, sizeof(s_err_note), "%s", "与工作台的链路已断开");
+            }
+        } else if (s_processing_seconds >= PROCESSING_TIMEOUT_SEC) {
+            snprintf(s_err_note, sizeof(s_err_note), "%s", "工作台未在 180 秒内返回结果");
+        }
+    }
+
     update_ui();
 }
 
@@ -264,9 +400,18 @@ static void meeting_record_task(void *arg) {
         return;
     }
 
+    ESP_LOGI(TAG, "录音采集任务启动: 采样率=%d, 每帧=%d 采样, 实时上行至工作台 5566",
+             SAMPLE_RATE, CHUNK_SAMPLES);
+
     uint32_t ticks = 0;
     while (s_state == MEETING_RECORDING) {
-        bsp_audio_read(chunk, CHUNK_SAMPLES * sizeof(int16_t));
+        size_t got = CHUNK_SAMPLES * sizeof(int16_t);
+        if (bsp_audio_read(chunk, got) != ESP_OK) {
+            ESP_LOGW(TAG, "麦克风读取失败, 本帧真实丢弃");
+        }
+        // 真实 PCM 上行 (16kHz/16bit/单声道)，工作台据此落盘为 .wav 并跑 AI 提炼流水线
+        card_link_send_audio(chunk, got);
+
         ticks++;
         if (ticks >= (SAMPLE_RATE / CHUNK_SAMPLES)) {
             ticks = 0;
@@ -275,19 +420,19 @@ static void meeting_record_task(void *arg) {
         }
     }
 
+    ESP_LOGI(TAG, "录音采集任务结束: 上行帧=%u, 丢弃帧=%u",
+             (unsigned)card_link_audio_frames(), (unsigned)card_link_audio_drops());
+
     free(chunk);
+    // 精确回收句柄: 仅当全局句柄仍指向自身时才清空，避免竞态误清新建任务
+    if (s_rec_task == xTaskGetCurrentTaskHandle()) {
+        s_rec_task = NULL;
+    }
     vTaskDelete(NULL);
 }
 
 void demo_meeting_enter(void) {
     s_scr = ui_pixel_screen_create("飞书会议");
-
-    // 读取芯片硬件 STA MAC 地址
-    uint8_t mac[6] = {0};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
-        snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    }
 
     // 右上角电量指示胶囊 (仅显示百分比数值，与左侧 FEISHU 标题框对称)
     lv_obj_t *bat_pill = ui_pixel_panel_create(s_scr, 164, 8, 68, 33, UI_PAPER);
@@ -315,8 +460,8 @@ void demo_meeting_enter(void) {
 
     s_p1_badge = lv_label_create(s_page[0]);
     lv_obj_set_style_text_font(s_p1_badge, &font_chinese_14, 0);
-    lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0x059669), 0);
-    lv_label_set_text(s_p1_badge, "[待命] 飞书开放平台网关就绪");
+    lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0xD97706), 0);
+    lv_label_set_text(s_p1_badge, "[待命] 等待无线网络");
     lv_obj_align(s_p1_badge, LV_ALIGN_TOP_MID, 0, 28);
 
     s_p1_timer = lv_label_create(s_page[0]);
@@ -329,19 +474,26 @@ void demo_meeting_enter(void) {
     lv_obj_set_style_text_font(s_p1_content, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p1_content, lv_color_hex(UI_INK), 0);
     lv_obj_set_style_text_align(s_p1_content, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_p1_content, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(s_p1_content, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_width(s_p1_content, 196);
-    lv_label_set_text(s_p1_content, "飞书会议智能妙记\n按 OK 键开始实时会议录音");
+    lv_label_set_text(s_p1_content,
+        "飞书会议智能妙记\n"
+        "按 OK 键开始录音\n"
+        "录音实时上行至工作台\n"
+        "自动提炼并同步飞书");
     lv_obj_align(s_p1_content, LV_ALIGN_TOP_MID, 0, 82);
 
     s_p1_hint = lv_label_create(s_page[0]);
     lv_obj_set_style_text_font(s_p1_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p1_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(s_p1_hint, "上键: 菜单   中键: 录音   下键: 换板");
+    lv_obj_set_style_text_align(s_p1_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_p1_hint, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(s_p1_hint, 212);
+    lv_label_set_text(s_p1_hint, "长按上键 菜单  下键 换页");
     lv_obj_align(s_p1_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
-    // 第 2 页容器: 真实配对连接与网络看板 (局域网真实IP，严格互斥对齐无重影)
+    // 第 2 页容器: 真实蓝牙配网与 5566 桥接链路看板 (严禁模拟假数据)
     // ========================================================================
     s_page[1] = lv_obj_create(panel);
     lv_obj_remove_style_all(s_page[1]);
@@ -351,49 +503,58 @@ void demo_meeting_enter(void) {
     lv_obj_t *p2_tab = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(p2_tab, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p2_tab, lv_color_hex(0x64748B), 0);
-    lv_label_set_text(p2_tab, "[2/3] 配对连接与网络看板");
+    lv_label_set_text(p2_tab, "[2/3] 蓝牙配网与工作台链路");
     lv_obj_align(p2_tab, LV_ALIGN_TOP_MID, 0, 6);
 
     s_p2_badge = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(s_p2_badge, &font_chinese_14, 0);
-    lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0x059669), 0);
-    lv_label_set_text(s_p2_badge, "[网络] 连接服务就绪");
+    lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0xD97706), 0);
+    lv_label_set_text(s_p2_badge, "[链路] 等待无线网络");
     lv_obj_align(s_p2_badge, LV_ALIGN_TOP_MID, 0, 28);
 
-    lv_obj_t *p2_prompt = lv_label_create(s_page[1]);
-    lv_obj_set_style_text_font(p2_prompt, &font_chinese_14, 0);
-    lv_obj_set_style_text_color(p2_prompt, lv_color_hex(0x475569), 0);
-    lv_label_set_text(p2_prompt, "电脑控制台地址:");
-    lv_obj_align(p2_prompt, LV_ALIGN_TOP_MID, 0, 50);
-
-    s_p2_url = lv_label_create(s_page[1]);
-    lv_obj_set_style_text_font(s_p2_url, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(s_p2_url, lv_color_hex(0x0284C7), 0);
-    lv_label_set_text(s_p2_url, "http://192.168.0.214:8000");
-    lv_obj_align(s_p2_url, LV_ALIGN_TOP_MID, 0, 68);
-
-    s_p2_port = lv_label_create(s_page[1]);
-    lv_obj_set_style_text_font(s_p2_port, &font_chinese_14, 0);
-    lv_obj_set_style_text_color(s_p2_port, lv_color_hex(0x334155), 0);
-    lv_label_set_text(s_p2_port, "通信端口: TCP 5566");
-    lv_obj_align(s_p2_port, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_t *p2_prompt_ble = lv_label_create(s_page[1]);
+    lv_obj_set_style_text_font(p2_prompt_ble, &font_chinese_14, 0);
+    lv_obj_set_style_text_color(p2_prompt_ble, lv_color_hex(0x475569), 0);
+    lv_label_set_text(p2_prompt_ble, "手机蓝牙配网服务名:");
+    lv_obj_align(p2_prompt_ble, LV_ALIGN_TOP_MID, 0, 50);
 
     s_p2_mac = lv_label_create(s_page[1]);
-    lv_obj_set_style_text_font(s_p2_mac, &font_chinese_14, 0);
-    lv_obj_set_style_text_color(s_p2_mac, lv_color_hex(0x334155), 0);
-    lv_label_set_text_fmt(s_p2_mac, "设备硬件: %s", s_mac_str);
-    lv_obj_align(s_p2_mac, LV_ALIGN_TOP_MID, 0, 112);
+    lv_obj_set_style_text_font(s_p2_mac, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_p2_mac, lv_color_hex(0x0284C7), 0);
+    lv_label_set_text(s_p2_mac, "FoloPassport");
+    lv_obj_align(s_p2_mac, LV_ALIGN_TOP_MID, 0, 68);
+
+    lv_obj_t *p2_prompt_srv = lv_label_create(s_page[1]);
+    lv_obj_set_style_text_font(p2_prompt_srv, &font_chinese_14, 0);
+    lv_obj_set_style_text_color(p2_prompt_srv, lv_color_hex(0x475569), 0);
+    lv_label_set_text(p2_prompt_srv, "工作台服务端地址:");
+    lv_obj_align(p2_prompt_srv, LV_ALIGN_TOP_MID, 0, 90);
+
+    s_p2_url = lv_label_create(s_page[1]);
+    lv_obj_set_style_text_font(s_p2_url, &font_chinese_14, 0);
+    lv_obj_set_style_text_color(s_p2_url, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_text_align(s_p2_url, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_p2_url, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_width(s_p2_url, 212);
+    lv_label_set_text(s_p2_url, "未下发地址");
+    lv_obj_align(s_p2_url, LV_ALIGN_TOP_MID, 0, 112);
 
     s_p2_status = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(s_p2_status, &font_chinese_14, 0);
-    lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x16A34A), 0);
-    lv_label_set_text(s_p2_status, "服务状态: 在线已连接");
+    lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x94A3B8), 0);
+    lv_obj_set_style_text_align(s_p2_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_p2_status, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_width(s_p2_status, 212);
+    lv_label_set_text(s_p2_status, "上行 0 下行 0");
     lv_obj_align(s_p2_status, LV_ALIGN_TOP_MID, 0, 134);
 
     lv_obj_t *p2_hint = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(p2_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p2_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p2_hint, "上键: 菜单   中键: 录音   下键: 换板");
+    lv_obj_set_style_text_align(p2_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(p2_hint, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(p2_hint, 212);
+    lv_label_set_text(p2_hint, "长按上键 菜单  下键 换页");
     lv_obj_align(p2_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
@@ -426,24 +587,32 @@ void demo_meeting_enter(void) {
     lv_obj_set_style_text_font(s_p3_content, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p3_content, lv_color_hex(UI_INK), 0);
     lv_obj_set_style_text_align(s_p3_content, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_p3_content, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(s_p3_content, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_width(s_p3_content, 196);
     lv_label_set_text(s_p3_content,
         "暂无待办事项记录\n"
-        "请按 OK 键开始会议录音\n"
+        "请按 OK 键开始录音\n"
         "自动提炼并同步到飞书");
     lv_obj_align(s_p3_content, LV_ALIGN_TOP_MID, 0, 82);
 
     lv_obj_t *p3_hint = lv_label_create(s_page[2]);
     lv_obj_set_style_text_font(p3_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p3_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p3_hint, "上键: 菜单   中键: 录音   下键: 换板");
+    lv_obj_set_style_text_align(p3_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(p3_hint, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(p3_hint, 212);
+    lv_label_set_text(p3_hint, "长按上键 菜单  下键 换页");
     lv_obj_align(p3_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     s_mascot = ui_pixel_mascot_create(s_scr, 101, 248);
 
+    // 订阅 5566 桥接链路事件: 真实纪要到达 / 工作台回传失败 / 反向指令
+    card_link_set_event_cb(on_card_link_event, NULL);
+
     s_state = MEETING_IDLE;
     s_rec_seconds = 0;
+    s_processing_seconds = 0;
+    s_err_note[0] = '\0';
 
     // 默认显示第 1 页
     show_page(0);
@@ -452,61 +621,125 @@ void demo_meeting_enter(void) {
     lv_screen_load(s_scr);
 }
 
+// 统一的录音开关动作: 实体按键与工作台反向指令共用同一套真实逻辑
+static void meeting_toggle_record(void)
+{
+    if (s_state == MEETING_RECORDING) {
+        // 结束录音: 通知工作台停录, 进入"真实等待提炼结果"状态
+        s_state = MEETING_PROCESSING;
+        s_processing_seconds = 0;
+        card_link_send_record_stop();
+        ESP_LOGI(TAG, "结束录音, 已通知工作台 record_stop, 等待真实提炼结果");
+    } else if (s_state == MEETING_IDLE || s_state == MEETING_COMPLETED ||
+               (s_state == MEETING_PROCESSING && s_err_note[0] != '\0')) {
+        // 开始录音: 清除上次失败提示, 真实通知工作台并启动上行采集任务
+        s_err_note[0] = '\0';
+        s_processing_seconds = 0;
+        s_rec_seconds = 0;
+        s_state = MEETING_RECORDING;
+        bsp_audio_set_format(SAMPLE_RATE, 16, 1);
+        if (s_rec_task == NULL) {
+            xTaskCreate(meeting_record_task, "rec_task", 4096, NULL, 5, &s_rec_task);
+        }
+        card_link_send_record_start();
+        ESP_LOGI(TAG, "开始录音, 已通知工作台 record_start");
+    }
+    update_ui();
+}
+
+// card_link 链路事件回调 (运行于 card_link 任务上下文, update_ui 内部自行加 LVGL 锁)
+static void on_card_link_event(card_link_event_t ev, void *user)
+{
+    (void)user;
+
+    switch (ev) {
+    case CARD_LINK_EV_SUMMARY:
+        // 收到工作台真实纪要: 提炼完成, 界面按真实数据渲染
+        s_err_note[0] = '\0';
+        if (s_state != MEETING_RECORDING) {
+            s_state = MEETING_COMPLETED;
+        }
+        break;
+
+    case CARD_LINK_EV_PIPELINE_FAILED: {
+        // 工作台如实回传失败: 展示真实原因, 不伪造成功
+        const char *e = card_link_last_error();
+        snprintf(s_err_note, sizeof(s_err_note), "%s", (e && e[0]) ? e : "工作台未返回失败原因");
+        if (s_state != MEETING_RECORDING) {
+            s_state = MEETING_PROCESSING;
+        }
+        break;
+    }
+
+    case CARD_LINK_EV_CMD_RECORD_START:
+        if (s_state != MEETING_RECORDING) {
+            meeting_toggle_record();
+        }
+        return;   // toggle 内部已刷新界面
+
+    case CARD_LINK_EV_CMD_RECORD_STOP:
+        if (s_state == MEETING_RECORDING) {
+            meeting_toggle_record();
+        }
+        return;   // toggle 内部已刷新界面
+
+    case CARD_LINK_EV_CONN_CHANGED:
+    default:
+        break;
+    }
+
+    update_ui();
+}
+
 void demo_meeting_exit(void) {
     if (s_tick_timer) {
         lv_timer_delete(s_tick_timer);
         s_tick_timer = NULL;
     }
-    if (s_state == MEETING_RECORDING) {
-        s_state = MEETING_IDLE;
-    }
-    if (s_rec_task) {
-        vTaskDelete(s_rec_task);
-        s_rec_task = NULL;
-    }
+    // 采集任务在 s_state 离开 MEETING_RECORDING 后会自行退出并回收自身
+    // (vTaskDelete(NULL))，此处严禁再对可能已失效的句柄调用 vTaskDelete，否则崩溃。
+    s_state = MEETING_IDLE;
+    s_rec_task = NULL;
+    s_processing_seconds = 0;
+    s_err_note[0] = '\0';
+
     if (s_scr) {
         lv_obj_delete(s_scr);
         s_scr = NULL;
         for (int i = 0; i < 3; i++) s_page[i] = NULL;
         s_bat_label = s_mascot = NULL;
         s_p1_badge = s_p1_timer = s_p1_content = s_p1_hint = NULL;
-        s_p2_badge = s_p2_url = s_p2_port = s_p2_mac = s_p2_status = NULL;
+        s_p2_badge = s_p2_url = s_p2_mac = s_p2_status = NULL;
         s_p3_badge = s_p3_title = s_p3_content = NULL;
     }
 }
 
 void demo_meeting_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
-    if (ev != BSP_BTN_CLICK) return;
-
-    // 轻量消抖 (200ms 保证按键快速灵敏)
-    static uint32_t s_last_key_tick = 0;
-    uint32_t now_tick = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
-    if (now_tick - s_last_key_tick < 200) {
+    // 按下瞬间立即给出吉祥物视觉反馈，提升按键手感 (不做业务状态变更)
+    if (ev == BSP_BTN_PRESS) {
+        if (btn == BSP_BTN_OK) ui_pixel_mascot_jump(s_mascot);
         return;
     }
-    s_last_key_tick = now_tick;
+    if (ev != BSP_BTN_CLICK) return;
 
-    ESP_LOGI(TAG, "按键触发: btn=%d, page=%d", btn, s_cur_page);
+    // 轻量消抖: 每个按键独立计时 (200ms)，避免跨按键共用计时导致连按丢键
+    static uint32_t s_last_tick[3] = {0, 0, 0};
+    uint32_t now_tick = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
+    int bidx = (int)btn;
+    if (bidx < 0 || bidx > 2) return;
+    if (now_tick - s_last_tick[bidx] < 200) {
+        return;
+    }
+    s_last_tick[bidx] = now_tick;
+
+    ESP_LOGI(TAG, "按键触发: btn=%d, page=%d, state=%d", btn, s_cur_page, (int)s_state);
 
     if (btn == BSP_BTN_OK) {
         ui_pixel_mascot_jump(s_mascot);
         if (s_cur_page == 0) {
-            // 第 1 页: 真实录音控制
-            if (s_state == MEETING_IDLE || s_state == MEETING_COMPLETED) {
-                s_state = MEETING_RECORDING;
-                s_rec_seconds = 0;
-                bsp_audio_set_format(SAMPLE_RATE, 16, 1);
-                xTaskCreate(meeting_record_task, "rec_task", 4096, NULL, 5, &s_rec_task);
-                update_ui();
-            } else if (s_state == MEETING_RECORDING) {
-                s_state = MEETING_PROCESSING;
-                update_ui();
-                s_state = MEETING_COMPLETED;
-                update_ui();
-            }
-        } else if (s_cur_page == 1) {
-            update_ui();
-        } else if (s_cur_page == 2) {
+            // 第 1 页: 真实录音控制 (提炼中不接受新指令, 需等待结果或超时)
+            meeting_toggle_record();
+        } else {
             update_ui();
         }
     } else if (btn == BSP_BTN_DOWN) {
@@ -517,7 +750,8 @@ void demo_meeting_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
             show_page((s_cur_page + 1) % 3);
         }
     } else if (btn == BSP_BTN_UP) {
-        // 上键: 刷新当前看板状态与吉祥物互动，不执行切页（彻底消除 GPIO0 地线瞬态毛刺导致的屏幕反复跳动闪烁）
+        // 上键短按: 刷新当前看板状态与吉祥物互动，不执行切页（彻底消除 GPIO0 地线瞬态毛刺导致的屏幕反复跳动闪烁）
+        // 返回主菜单请长按上键 (由 main.c 的全局按键路由统一处理)
         ui_pixel_mascot_jump(s_mascot);
         update_ui();
     }

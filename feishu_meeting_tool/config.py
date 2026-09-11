@@ -3,7 +3,7 @@ import os
 import json
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from .bot_notifier import DEFAULT_BOT_CHANNELS
 
@@ -196,7 +196,7 @@ class AppConfig:
     llm_providers: List[Dict[str, Any]] = field(default_factory=lambda: list(DEFAULT_LLM_PROVIDERS))
 
     # 语音转写 ASR 配置
-    asr_provider: str = field(default_factory=lambda: os.getenv("ASR_PROVIDER", "whisper_mock"))
+    asr_provider: str = field(default_factory=lambda: os.getenv("ASR_PROVIDER", "whisper"))
     asr_api_key: str = field(default_factory=lambda: os.getenv("ASR_API_KEY", ""))
     asr_app_id: str = field(default_factory=lambda: os.getenv("ASR_APP_ID", ""))
 
@@ -207,6 +207,14 @@ class AppConfig:
     bridge_host: str = field(default_factory=lambda: os.getenv("BRIDGE_HOST", "0.0.0.0"))
     bridge_port: int = field(default_factory=lambda: int(os.getenv("BRIDGE_PORT", "5566")))
     serial_port: str = field(default_factory=lambda: os.getenv("SERIAL_PORT", ""))
+
+    # 硬件胸卡 WebSocket 通道 (/ws/card) 访问令牌。
+    # 为空表示不校验 (仅建议在局域网调试时使用); 公网部署务必设置,
+    # 否则任何人只要能连上该路径就能伪造胸卡报文、注入会议音频。
+    card_ws_token: str = field(default_factory=lambda: os.getenv("CARD_WS_TOKEN", ""))
+
+    # 用户注册开关: 默认关闭 (内部系统), 需要开放注册时设 ALLOW_REGISTER=true
+    allow_register: bool = field(default_factory=lambda: os.getenv("ALLOW_REGISTER", "false").lower() in ["true", "1", "yes"])
 
     # Web 服务器配置
     web_host: str = field(default_factory=lambda: os.getenv("WEB_HOST", "127.0.0.1"))

@@ -1,0 +1,4 @@
+dependencies:
+  idf: ">=5.5.3,<5.6.0"
+  # 硬件胸卡桥接通道使用的 WebSocket 客户端 (wss:// 走 443, 复用站点 HTTPS 证书)
+  espressif/esp_websocket_client: "^1.2.0"

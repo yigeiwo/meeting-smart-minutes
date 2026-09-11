@@ -41,6 +41,26 @@ esp_err_t ble_prov_get_ip_str(char *buf, size_t max_len);
  */
 esp_err_t ble_prov_get_ssid_str(char *buf, size_t max_len);
 
+/**
+ * @brief 工作台服务端地址: 由配网页随 Wi-Fi 凭据一起下发, 并持久化到 NVS。
+ *        配网报文格式:
+ *        {"ssid":"..","pwd":"..","host":"ai.shuoyunqi.online","port":443,
+ *         "tls":true,"path":"/ws/card","token":"设备令牌"}
+ *        未下发过时 has_server() 返回 false, 不做任何地址猜测。
+ */
+esp_err_t ble_prov_get_server_host(char *buf, size_t max_len);
+uint16_t  ble_prov_get_server_port(void);
+bool      ble_prov_has_server(void);
+
+/** 是否使用 TLS (wss)。默认为 true, 即走 443 复用站点的 HTTPS 证书 */
+bool      ble_prov_get_server_tls(void);
+
+/** WebSocket 路径 (默认 /ws/card) */
+esp_err_t ble_prov_get_server_path(char *buf, size_t max_len);
+
+/** 设备令牌 (为空表示工作台未启用令牌校验) */
+esp_err_t ble_prov_get_server_token(char *buf, size_t max_len);
+
 #ifdef __cplusplus
 }
 #endif

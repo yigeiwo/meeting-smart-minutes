@@ -200,7 +200,7 @@ void demo_wifi_enter(void) {
     lv_obj_set_style_text_font(hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(0x94A3B8), 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_width(hint, 190);
     lv_label_set_text(hint, "无触屏 | 手机NFC碰一下/蓝牙配网");
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);

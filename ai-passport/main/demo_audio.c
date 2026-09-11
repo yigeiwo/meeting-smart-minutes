@@ -109,7 +109,7 @@ void demo_audio_enter(void) {
     s_status = lv_label_create(panel);
     lv_obj_set_style_text_color(s_status, lv_color_hex(UI_INK), 0);
     lv_obj_set_style_text_align(s_status, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_status, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(s_status, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_width(s_status, 176);
     lv_label_set_text(s_status, "OK: 1kHz TONE\nUP: RECORD + PLAY");
     lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 0, -9);

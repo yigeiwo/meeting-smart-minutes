@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NFC 碰一碰配置 · AI 胸卡</title>
+    <style>
+        :root {
+            --primary: #3B82F6;
+            --primary-dark: #2563EB;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --bg: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+        body { background: var(--bg); color: var(--text-main); min-height: 100vh; padding: 20px 16px 40px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 460px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 22px; padding-top: 6px; }
+        .logo-badge { display: inline-flex; align-items: center; justify-content: center; width: 58px; height: 58px; border-radius: 18px; background: linear-gradient(135deg, #F97316 0%, #EA580C 100%); color: #fff; font-size: 28px; margin-bottom: 12px; box-shadow: 0 8px 18px rgba(249, 115, 22, 0.28); }
+        .title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+        .subtitle { font-size: 13px; color: var(--text-muted); }
+
+        .card { background: var(--card-bg); border-radius: 20px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid var(--border); margin-bottom: 16px; }
+        .card h4 { font-size: 15px; font-weight: 700; color: #1E293B; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+        .card p, .card li { font-size: 13px; color: #475569; line-height: 1.75; }
+        .card ol, .card ul { padding-left: 20px; }
+        .card code { background: #E2E8F0; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: #0F172A; word-break: break-all; }
+
+        .url-box { display: flex; align-items: center; gap: 8px; background: #0F172A; border-radius: 12px; padding: 12px 12px; margin: 10px 0 6px; }
+        .url-box code { background: transparent; color: #7DD3FC; font-size: 12.5px; flex: 1; word-break: break-all; padding: 0; }
+        .btn-copy { flex: 0 0 auto; border: 1px solid #334155; background: #1E293B; color: #7DD3FC; border-radius: 8px; font-size: 12px; padding: 6px 12px; cursor: pointer; font-weight: 600; }
+        .btn-copy:active { transform: scale(0.97); }
+
+        .btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 48px; border-radius: 14px; font-size: 16px; font-weight: 600; border: none; cursor: pointer; transition: all .2s; gap: 8px; text-decoration: none; }
+        .btn-primary { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: #fff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+        .btn-primary:active { transform: scale(0.98); }
+        .btn-ghost { background: #FFF; color: #334155; border: 1px solid var(--border); }
+        .btn-row { display: flex; flex-direction: column; gap: 10px; }
+
+        .note { border-radius: 12px; padding: 12px; font-size: 12.5px; line-height: 1.7; }
+        .note-warning { background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; }
+        .note-info { background: #EFF6FF; border: 1px solid #BFDBFE; color: #1D4ED8; }
+        .note-success { background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; }
+        .note b { font-weight: 700; }
+
+        .flow { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+        .flow-item { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: #475569; }
+        .flow-idx { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; background: #E0EAFF; color: #2563EB; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+
+        .footer { text-align: center; font-size: 12px; color: #94A3B8; margin-top: 8px; line-height: 1.7; }
+        .footer a { color: #2563EB; text-decoration: none; }
+        .tag-status { margin-top: 10px; font-size: 12.5px; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-badge">📶</div>
+            <h1 class="title">手机 NFC 碰一碰</h1>
+            <p class="subtitle">碰一下胸卡背面 · 自动打开配网页面</p>
+        </div>
+
+        <div class="card">
+            <h4><span>🏷️</span> 第一步：把下面这个网址写入标签</h4>
+            <p>用手机的 <b>NFC Tools</b> 把下面这个地址写入胸卡背面的 NFC 标签：</p>
+            <div class="url-box">
+                <code id="tagUrl">读取中...</code>
+                <button type="button" class="btn-copy" onclick="copyTagUrl()">复制</button>
+            </div>
+            <div class="tag-status" id="urlHint"></div>
+        </div>
+
+        <div class="card">
+            <h4><span>✍️</span> 第二步：写入操作步骤</h4>
+            <ol>
+                <li>手机应用商店免费下载 <b>NFC Tools</b>；</li>
+                <li>打开 NFC Tools &gt; 点击<b>【写】</b> &gt; 点击<b>【添加记录】</b>；</li>
+                <li>选择<b>【网址 / URL】</b>，粘贴上面那个地址；</li>
+                <li>点击<b>【写入】</b>，把手机背面贴近胸卡背面的 NFC 区域；</li>
+                <li>手机提示写入成功即完成，以后碰一下就会自动打开配网页。</li>
+            </ol>
+            <div class="note note-info" style="margin-top:12px;">
+                胸卡背面是<b>被动 NTAG213 标签</b>：它不需要供电，固件也无法读写它。
+                碰一碰会打开哪个页面，<b>完全由标签里写入的网址决定</b>。
+            </div>
+        </div>
+
+        <div class="card">
+            <h4><span>📱</span> 碰一碰之后会发生什么</h4>
+            <div class="flow">
+                <div class="flow-item"><div class="flow-idx">1</div><div>手机碰胸卡背面，浏览器自动打开<b>本系统的蓝牙配网页</b>；</div></div>
+                <div class="flow-item"><div class="flow-idx">2</div><div>在页面里点击<b>【连接蓝牙设备】</b>，选择 <code>FoloPassport</code>；</div></div>
+                <div class="flow-item"><div class="flow-idx">3</div><div>填入 2.4GHz Wi-Fi 名称与密码，点击<b>【下发配网】</b>；</div></div>
+                <div class="flow-item"><div class="flow-idx">4</div><div>胸卡自动连上网络，并<b>自动连接本工作台（5566 端口）</b>；</div></div>
+                <div class="flow-item"><div class="flow-idx">5</div><div>按胸卡 OK 键开始录音，会议纪要会实时回推到胸卡屏幕。</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h4><span>🧭</span> 碰一碰打开的不是配网页？</h4>
+            <p>如果碰一碰打开的是设备二维码等<b>无关页面</b>，说明标签里还是旧链接。
+            按上面<b>第二步</b>用 NFC Tools <b>重新写入本页地址覆盖</b>即可修复。</p>
+            <div class="note note-warning" style="margin-top:12px;">
+                请务必确认写入的是<b>本页地址</b>，并且手机与胸卡在同一个可访问的网络环境下能打开它。
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <a class="btn btn-primary" href="/wifi">🔍 前往蓝牙配网页</a>
+            <a class="btn btn-ghost" href="/">← 返回工作台首页</a>
+        </div>
+
+        <div class="footer">
+            本页地址：<a id="selfUrl" href="/nfc">/nfc</a><br>
+            建议直接把 <code>/nfc</code> 这一页写入 NFC 标签，便于随时查看与复制写入地址。
+        </div>
+    </div>
+
+    <script>
+        // 写入标签的地址 = 本站 /wifi (手机碰一碰后直接进入配网)
+        (function initUrl() {
+            var origin = window.location.origin;
+            var tagUrl = origin + '/wifi';
+            document.getElementById('tagUrl').innerText = tagUrl;
+            document.getElementById('selfUrl').href = origin + '/nfc';
+            document.getElementById('selfUrl').innerText = origin + '/nfc';
+
+            var hint = document.getElementById('urlHint');
+            if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(origin)) {
+                hint.innerHTML = '⚠️ 当前是 localhost 地址，手机无法访问。请改用电脑局域网 IP 或正式域名重新打开本页后再复制。';
+            } else if (location.protocol === 'https:') {
+                hint.innerHTML = '✅ 当前是 HTTPS 正式域名地址，可直接写入 NFC 标签。';
+            } else {
+                hint.innerHTML = 'ℹ️ 当前是 HTTP 地址。若在公网使用，建议改用 HTTPS 域名。';
+            }
+        })();
+
+        function copyTagUrl() {
+            var text = document.getElementById('tagUrl').innerText;
+            var done = function () { alert('已复制，可直接粘贴到 NFC Tools 的【网址 / URL】里：\n' + text); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done, function () { window.prompt('请手动复制：', text); });
+            } else {
+                window.prompt('请手动复制：', text);
+            }
+        }
+    </script>
+</body>
+</html>

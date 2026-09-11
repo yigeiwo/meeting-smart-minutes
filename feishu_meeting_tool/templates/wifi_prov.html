@@ -32,6 +32,7 @@
         .form-label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 8px; }
         .form-control { width: 100%; height: 46px; border: 1.5px solid var(--border); border-radius: 12px; padding: 0 14px; font-size: 15px; outline: none; transition: border-color 0.2s; background: #FAFAFA; }
         .form-control:focus { border-color: var(--primary); background: #FFF; }
+        .field-tip { margin-top: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
         
         .btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 48px; border-radius: 14px; font-size: 16px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; gap: 8px; }
         .btn-primary { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: #fff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
@@ -47,6 +48,14 @@
         .nfc-tip h4 { font-size: 14px; font-weight: 700; color: #1E293B; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
         .nfc-tip ol { padding-left: 20px; line-height: 1.8; }
         .nfc-tip code { background: #E2E8F0; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px; color: #0F172A; }
+        .nfc-tip .nfc-warn { display: none; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; line-height: 1.6; font-size: 12px; }
+        .nfc-tip .nfc-trouble { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #CBD5E1; line-height: 1.7; font-size: 12px; }
+        .nfc-tip .nfc-trouble b { color: #B45309; }
+        .nfc-tip .nfc-trouble p { margin-top: 4px; color: #475569; }
+        .url-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .url-row code { flex: 1; word-break: break-all; }
+        .btn-copy { flex: 0 0 auto; border: 1px solid #CBD5E1; background: #FFF; color: #2563EB; border-radius: 8px; font-size: 12px; padding: 5px 10px; cursor: pointer; font-weight: 600; }
+        .btn-copy:active { transform: scale(0.97); }
     </style>
 </head>
 <body>
@@ -68,6 +77,36 @@
                 <input type="password" id="pwdInput" class="form-control" placeholder="请输入 Wi-Fi 密码 (无密码留空)">
             </div>
 
+            <div class="form-group">
+                <label class="form-label">工作台地址 (IP 或域名)</label>
+                <input type="text" id="hostInput" class="form-control" placeholder="例如: ai.shuoyunqi.online 或 192.168.1.100">
+                <div class="field-tip">已自动填入本页地址。填<b>公网域名</b>走 wss://（推荐，复用 443 证书，无需额外放行端口）；填<b>局域网 IP</b> 则直连本地工作台。</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">连接方式</label>
+                <select id="tlsSelect" class="form-control" onchange="onSchemeChange()">
+                    <option value="1" selected>wss（TLS 加密，走 443，推荐）</option>
+                    <option value="0">ws（明文，走 80 或 5566，仅建议局域网）</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">端口</label>
+                <input type="text" id="portInput" class="form-control" value="443">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">WebSocket 路径</label>
+                <input type="text" id="pathInput" class="form-control" value="/ws/card">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">设备令牌 (可选)</label>
+                <input type="text" id="tokenInput" class="form-control" placeholder="对应服务端 CARD_WS_TOKEN，留空表示服务端未启用校验">
+                <div class="field-tip">公网部署<b>务必填写</b>：否则任何人只要能连上该路径，就能伪造胸卡报文并注入会议音频。</div>
+            </div>
+
             <button id="pairBtn" class="btn btn-primary" onclick="startBlePairing()">
                 <span>🔍 蓝牙连接胸卡并同步 Wi-Fi</span>
             </button>
@@ -76,19 +115,56 @@
         </div>
 
         <div class="nfc-tip">
-            <h4><span>🏷️</span> 手机 NFC 碰一碰配置教程</h4>
+            <h4><span>🏷️</span> 胸卡背面 NFC 标签写入教程</h4>
+            <div class="nfc-warn" id="nfcWarnBox">
+                ⚠️ 当前用的是 <b>localhost / 127.0.0.1</b> 地址，手机无法访问，<b>请勿用它写入 NFC 标签</b>。<br>
+                请改用电脑局域网 IP 重新打开本页，例如 <code id="lanHint"></code>
+            </div>
             <ol>
+                <li>确认手机与电脑连在同一个 Wi-Fi，且本页地址是<b>电脑局域网 IP</b>（形如 <code>http://192.168.x.x:8000/wifi</code>）；</li>
                 <li>手机下载免费 App <b>NFC Tools</b> (各大应用商店均有免费下载)；</li>
                 <li>打开 NFC Tools &gt; 点击<b>【写】</b> &gt; 点击<b>【添加记录】</b>；</li>
-                <li>选择<b>【网址 / URL】</b>，输入当前网址：<br><code id="curUrlText"></code></li>
+                <li>选择<b>【网址 / URL】</b>，填入下面这个地址：
+                    <div class="url-row">
+                        <code id="curUrlText"></code>
+                        <button type="button" class="btn-copy" onclick="copyNfcUrl()">复制</button>
+                    </div>
+                </li>
                 <li>点击<b>【写入】</b>并将手机背面贴近胸卡背面的 NFC 区域；</li>
-                <li>手机提示写入成功后，以后拿手机碰一下胸卡背面，就会自动弹出本配网页面！</li>
+                <li>提示写入成功后，手机碰一下胸卡背面就会直接弹出本配网页面。</li>
             </ol>
+            <div class="nfc-trouble">
+                <b>❓ 碰一碰打开的不是本配网页？</b>
+                <p>胸卡背面是<b>被动 NTAG213 标签</b>：它没有供电，固件也无法读写它，碰一碰打开哪个页面<b>完全由标签内写入的 URL 决定</b>。
+                若目前碰一碰打开的是设备二维码等无关页面，按上面步骤用 NFC Tools <b>重新写入本页地址覆盖</b>即可修复。</p>
+            </div>
         </div>
     </div>
 
     <script>
-        document.getElementById('curUrlText').innerText = window.location.href;
+        // NFC 标签必须写入手机可访问的局域网地址，localhost 对手机无效
+        (function initNfcUrl() {
+            const href = window.location.href;
+            const host = window.location.hostname;
+            document.getElementById('curUrlText').innerText = href;
+            // 工作台地址自动填入本页主机名: 卡片据此直连 5566 桥接端口
+            document.getElementById('hostInput').value = host;
+            if (/^(localhost|127\.0\.0\.1|\[::1\])$/i.test(host)) {
+                document.getElementById('lanHint').innerText =
+                    href.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)/i, '$1<电脑局域网IP>');
+                document.getElementById('nfcWarnBox').style.display = 'block';
+            }
+        })();
+
+        function copyNfcUrl() {
+            const text = document.getElementById('curUrlText').innerText;
+            const done = () => alert('已复制，可直接粘贴到 NFC Tools 的【网址 / URL】里：\n' + text);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done, () => window.prompt('请手动复制：', text));
+            } else {
+                window.prompt('请手动复制：', text);
+            }
+        }
 
         const BLE_SERVICE_UUID = 0xFFF0;
         const CHAR_WRITE_UUID  = 0xFFF1;
@@ -101,13 +177,30 @@
             box.style.display = 'block';
         }
 
+        // 切换 wss / ws 时自动带出常用端口
+        function onSchemeChange() {
+            var tls = document.getElementById('tlsSelect').value === '1';
+            var host = document.getElementById('hostInput').value.trim();
+            var isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+            document.getElementById('portInput').value = tls ? '443' : (isIp ? '5566' : '80');
+        }
+
         async function startBlePairing() {
             const ssid = document.getElementById('ssidInput').value.trim();
             const pwd  = document.getElementById('pwdInput').value;
+            const host = document.getElementById('hostInput').value.trim();
+            const tls  = document.getElementById('tlsSelect').value === '1';
+            const port = parseInt(document.getElementById('portInput').value, 10) || (tls ? 443 : 5566);
+            const path = document.getElementById('pathInput').value.trim() || '/ws/card';
+            const token = document.getElementById('tokenInput').value.trim();
             const btn  = document.getElementById('pairBtn');
 
             if (!ssid) {
                 alert('请输入 Wi-Fi 名称 (SSID)');
+                return;
+            }
+            if (!host || /^(localhost|127\.0\.0\.1)$/i.test(host)) {
+                alert('请填写工作台地址（局域网 IP 或公网域名），不能是 localhost/127.0.0.1，否则胸卡无法连上工作台的 5566 端口。');
                 return;
             }
 
@@ -144,7 +237,8 @@
                         if (data.status === 1) {
                             showStatus('⏳ 胸卡正在连接路由器: ' + ssid + '...', 'loading');
                         } else if (data.status === 2) {
-                            showStatus('🎉 <b>配网大功告成！</b><br>胸卡已成功连上网络，获取真实 IP:<br><b style="font-size:16px;color:#059669;">' + data.ip + '</b>', 'success');
+                            var url = (tls ? 'wss://' : 'ws://') + host + ':' + port + path;
+                            showStatus('🎉 <b>配网大功告成！</b><br>胸卡已连上网络，获取真实 IP:<br><b style="font-size:16px;color:#059669;">' + data.ip + '</b><br><br>胸卡将自动连接工作台 <b>' + url + '</b>，连接成功后工作台首页的硬件视窗会显示「已连接」。', 'success');
                             btn.disabled = false;
                         } else if (data.status === 3) {
                             showStatus('❌ 胸卡连接 Wi-Fi 失败，请检查密码是否正确！', 'error');
@@ -155,12 +249,16 @@
                     }
                 });
 
-                showStatus('正在将 Wi-Fi 凭证同步给胸卡...', 'loading');
-                const payload = JSON.stringify({ ssid: ssid, pwd: pwd });
+                showStatus('正在将 Wi-Fi 凭证与工作台连接参数同步给胸卡...', 'loading');
+                // 一次下发 Wi-Fi 凭据 + 工作台 wss 地址/路径/设备令牌，卡片据此建立真实桥接通道
+                const payload = JSON.stringify({
+                    ssid: ssid, pwd: pwd, host: host, port: port,
+                    tls: tls, path: path, token: token
+                });
                 const encoder = new TextEncoder();
                 await writeChar.writeValueWithResponse(encoder.encode(payload));
 
-                showStatus('Wi-Fi 凭据已写入胸卡，等待胸卡接入网络...', 'loading');
+                showStatus('凭证已写入胸卡，等待胸卡接入网络并连接工作台...', 'loading');
 
             } catch (err) {
                 console.error(err);

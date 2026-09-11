@@ -23,6 +23,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static const char *TAG = "ble_prov";
 static const char *DEVICE_NAME = "FoloPassport";
@@ -47,7 +48,83 @@ static char     s_cur_pwd[66] = {0};
 static int      s_retry_cnt = 0;
 static esp_netif_t *s_sta_netif = NULL;
 
+// 工作台服务端地址: 由配网页随 Wi-Fi 凭据一并下发, 并持久化到 NVS。
+// 严禁猜测/硬编码: 未下发时处于"未配置"态, 由上层如实提示"等待下发服务端"。
+// 默认走 wss://<host>:443/ws/card，复用站点 HTTPS 证书，无需额外放行端口。
+static char     s_server_host[64] = {0};
+static uint16_t s_server_port = 443;
+static bool     s_server_tls = true;
+static char     s_server_path[48] = "/ws/card";
+static char     s_server_token[64] = {0};
+
 static int ble_prov_advertise(void);
+
+// 从 JSON 文本里取 "key":"value" 的字符串值 (不引入额外解析依赖)
+static void json_take_str(const char *input, const char *key, char *out, size_t max_out)
+{
+    out[0] = '\0';
+    if (!input || !key) return;
+
+    char pat[40];
+    snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char *p = strstr(input, pat);
+    if (!p) return;
+    p = strchr(p + strlen(pat), ':');
+    if (!p) return;
+    p = strchr(p, '"');
+    if (!p) return;
+    p++;
+    const char *q = strchr(p, '"');
+    if (!q || q <= p) return;
+
+    size_t len = (size_t)(q - p);
+    if (len >= max_out) len = max_out - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+}
+
+// 解析配网报文中的工作台连接参数
+static void parse_server_info(const char *input,
+                              char *out_host, size_t max_host,
+                              uint16_t *out_port, bool *out_tls,
+                              char *out_path, size_t max_path,
+                              char *out_token, size_t max_token)
+{
+    out_host[0] = '\0';
+    out_path[0] = '\0';
+    out_token[0] = '\0';
+    if (!input) return;
+
+    json_take_str(input, "host", out_host, max_host);
+    if (out_host[0] == '\0') json_take_str(input, "server", out_host, max_host);
+    json_take_str(input, "path", out_path, max_path);
+    json_take_str(input, "token", out_token, max_token);
+
+    const char *pt = strstr(input, "\"port\"");
+    if (pt) {
+        const char *p = strchr(pt, ':');
+        if (p) {
+            p++;
+            while (*p == ' ') p++;
+            long v = strtol(p, NULL, 10);
+            if (v > 0 && v <= 65535) *out_port = (uint16_t)v;
+        }
+    }
+
+    const char *tl = strstr(input, "\"tls\"");
+    if (tl) {
+        const char *p = strchr(tl, ':');
+        if (p) {
+            p++;
+            while (*p == ' ') p++;
+            *out_tls = (strncmp(p, "true", 4) == 0 || *p == '1');
+            if (*out_tls) {
+                // 走 TLS 时端口通常为 443; 若报文没给端口则兜底 443
+                if (!pt || *out_port == 5566) *out_port = 443;
+            }
+        }
+    }
+}
 
 // 解析凭据: 兼容 JSON 格式 {"ssid":"...","pwd":"..."} 与换行格式 SSID\nPWD
 static void parse_credentials(const char *input, char *out_ssid, size_t max_ssid, char *out_pwd, size_t max_pwd) {
@@ -129,16 +206,49 @@ static void send_notify_msg(const char *msg) {
     }
 }
 
-// 保存 Wi-Fi 凭证到 NVS
+// 保存 Wi-Fi 凭证与工作台服务端地址到 NVS
 static void save_wifi_to_nvs(const char *ssid, const char *pwd) {
     nvs_handle_t nvs_h;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_h) == ESP_OK) {
         nvs_set_str(nvs_h, "ssid", ssid);
         nvs_set_str(nvs_h, "pwd", pwd);
+        if (s_server_host[0]) {
+            nvs_set_str(nvs_h, "srv_host", s_server_host);
+            nvs_set_u16(nvs_h, "srv_port", s_server_port);
+            nvs_set_u8(nvs_h, "srv_tls", s_server_tls ? 1 : 0);
+            nvs_set_str(nvs_h, "srv_path", s_server_path);
+            nvs_set_str(nvs_h, "srv_token", s_server_token);
+        }
         nvs_commit(nvs_h);
         nvs_close(nvs_h);
-        ESP_LOGI(TAG, "已成功将 Wi-Fi 凭证保存到 NVS (SSID: %s)", ssid);
+        ESP_LOGI(TAG, "已保存到 NVS: SSID=%s, 工作台=%s:%u", ssid,
+                 s_server_host[0] ? s_server_host : "(未下发)", (unsigned)s_server_port);
     }
+}
+
+// 从 NVS 读取历史工作台服务端地址
+static void load_server_from_nvs(void) {
+    nvs_handle_t nvs_h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_h) != ESP_OK) return;
+    size_t len = sizeof(s_server_host);
+    if (nvs_get_str(nvs_h, "srv_host", s_server_host, &len) == ESP_OK && s_server_host[0]) {
+        uint16_t p = 443;
+        if (nvs_get_u16(nvs_h, "srv_port", &p) == ESP_OK && p != 0) s_server_port = p;
+        uint8_t tls = 1;
+        if (nvs_get_u8(nvs_h, "srv_tls", &tls) == ESP_OK) s_server_tls = (tls != 0);
+        size_t plen = sizeof(s_server_path);
+        if (nvs_get_str(nvs_h, "srv_path", s_server_path, &plen) != ESP_OK || s_server_path[0] == '\0') {
+            snprintf(s_server_path, sizeof(s_server_path), "%s", "/ws/card");
+        }
+        size_t tlen = sizeof(s_server_token);
+        if (nvs_get_str(nvs_h, "srv_token", s_server_token, &tlen) != ESP_OK) {
+            s_server_token[0] = '\0';
+        }
+        ESP_LOGI(TAG, "从 NVS 恢复工作台地址: %s://%s:%u%s (令牌:%s)",
+                 s_server_tls ? "wss" : "ws", s_server_host, (unsigned)s_server_port,
+                 s_server_path, s_server_token[0] ? "有" : "无");
+    }
+    nvs_close(nvs_h);
 }
 
 // 从 NVS 读取历史 Wi-Fi 凭据
@@ -231,7 +341,8 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
 
     if (uuid16 == 0xFFF1) { // 写入 Wi-Fi 凭据
         if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
-            char rx_buf[192] = {0};
+            // 配网报文含 Wi-Fi 凭据 + 工作台 wss 地址/路径/设备令牌, 需要足够缓冲
+            char rx_buf[384] = {0};
             uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
             if (len >= sizeof(rx_buf)) len = sizeof(rx_buf) - 1;
             ble_hs_mbuf_to_flat(ctxt->om, rx_buf, len, NULL);
@@ -241,6 +352,32 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
             char ssid[34] = {0};
             char pwd[66] = {0};
             parse_credentials(rx_buf, ssid, sizeof(ssid), pwd, sizeof(pwd));
+
+            // 同一报文内可附带工作台连接参数 (wss 地址/路径/设备令牌), 供卡片建立真实桥接通道
+            char host[64] = {0};
+            char path[48] = {0};
+            char token[64] = {0};
+            uint16_t port = s_server_port;
+            bool tls = s_server_tls;
+            parse_server_info(rx_buf, host, sizeof(host), &port, &tls,
+                              path, sizeof(path), token, sizeof(token));
+            if (host[0]) {
+                strncpy(s_server_host, host, sizeof(s_server_host) - 1);
+                s_server_host[sizeof(s_server_host) - 1] = '\0';
+                s_server_port = port;
+                s_server_tls = tls;
+                if (path[0]) {
+                    strncpy(s_server_path, path, sizeof(s_server_path) - 1);
+                    s_server_path[sizeof(s_server_path) - 1] = '\0';
+                } else {
+                    snprintf(s_server_path, sizeof(s_server_path), "%s", "/ws/card");
+                }
+                strncpy(s_server_token, token, sizeof(s_server_token) - 1);
+                s_server_token[sizeof(s_server_token) - 1] = '\0';
+                ESP_LOGI(TAG, "已接收工作台地址: %s://%s:%u%s (令牌:%s)",
+                         s_server_tls ? "wss" : "ws", s_server_host, (unsigned)s_server_port,
+                         s_server_path, s_server_token[0] ? "有" : "无");
+            }
 
             if (strlen(ssid) > 0) {
                 ESP_LOGI(TAG, "准备连接 Wi-Fi: SSID=%s", ssid);
@@ -366,7 +503,9 @@ esp_err_t ble_prov_start(void) {
     nimble_port_freertos_init(host_task);
     s_ble_started = true;
 
-    // 2. 检查 NVS 中是否有保存的 Wi-Fi，有则自动后台自连
+    // 2. 先恢复历史工作台地址, 再检查 NVS 中是否有保存的 Wi-Fi，有则自动后台自连
+    load_server_from_nvs();
+
     char saved_ssid[34] = {0};
     char saved_pwd[66] = {0};
     if (load_wifi_from_nvs(saved_ssid, sizeof(saved_ssid), saved_pwd, sizeof(saved_pwd))) {
@@ -405,4 +544,42 @@ esp_err_t ble_prov_get_ssid_str(char *buf, size_t max_len) {
         return ESP_OK;
     }
     return ESP_ERR_NOT_FOUND;
+}
+
+bool ble_prov_has_server(void) {
+    return (s_server_host[0] != '\0' && s_server_port != 0);
+}
+
+esp_err_t ble_prov_get_server_host(char *buf, size_t max_len) {
+    if (!buf || max_len == 0) return ESP_ERR_INVALID_ARG;
+    if (!ble_prov_has_server()) {
+        buf[0] = '\0';
+        return ESP_ERR_NOT_FOUND;
+    }
+    strncpy(buf, s_server_host, max_len - 1);
+    buf[max_len - 1] = '\0';
+    return ESP_OK;
+}
+
+uint16_t ble_prov_get_server_port(void) {
+    return s_server_port;
+}
+
+bool ble_prov_get_server_tls(void) {
+    return s_server_tls;
+}
+
+esp_err_t ble_prov_get_server_path(char *buf, size_t max_len) {
+    if (!buf || max_len == 0) return ESP_ERR_INVALID_ARG;
+    const char *src = (s_server_path[0] != '\0') ? s_server_path : "/ws/card";
+    strncpy(buf, src, max_len - 1);
+    buf[max_len - 1] = '\0';
+    return ESP_OK;
+}
+
+esp_err_t ble_prov_get_server_token(char *buf, size_t max_len) {
+    if (!buf || max_len == 0) return ESP_ERR_INVALID_ARG;
+    strncpy(buf, s_server_token, max_len - 1);
+    buf[max_len - 1] = '\0';
+    return ESP_OK;
 }

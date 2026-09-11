@@ -3,6 +3,9 @@ import os
 import json
 import time
 import shutil
+import asyncio
+import queue
+import threading
 import logging
 import urllib.request
 from pathlib import Path
@@ -28,6 +31,37 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 bridge: Optional[CardBridge] = None
+
+
+class WsTransport:
+    """把 WebSocket 连接适配成与原始 socket 一致的接口 (sendall / close)。
+
+    这样 CardBridge 里既有的广播与状态机逻辑可以原样复用，无需区分
+    "裸 TCP 5566 客户端" 与 "wss:///ws/card 客户端"。
+    """
+
+    def __init__(self, ws, loop):
+        self._ws = ws
+        self._loop = loop
+        self._closed = False
+
+    def sendall(self, data: bytes):
+        if self._closed:
+            raise ConnectionError("websocket 已关闭")
+        # NDJSON 本身是 UTF-8 文本行，用文本帧发送
+        text = data.decode("utf-8", "replace")
+        # 真实等待发送结果: 失败会抛异常, 由 CardBridge 判定为死连接并剔除
+        fut = asyncio.run_coroutine_threadsafe(self._ws.send_text(text), self._loop)
+        fut.result(timeout=10)
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
+        except Exception:
+            pass
 
 
 def get_auth_user(request: Request) -> Optional[Dict[str, Any]]:
@@ -109,7 +143,7 @@ async def index_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={},
+        context={"allow_register": get_config().allow_register},
         media_type="text/html; charset=utf-8",
     )
 
@@ -124,22 +158,55 @@ async def wifi_page(request: Request):
     )
 
 
+@app.get("/nfc", response_class=HTMLResponse)
+async def nfc_page(request: Request):
+    """NFC 碰一碰配置引导页 (无鉴权, 供手机碰一碰直接打开, 与 /wifi 一致)"""
+    return templates.TemplateResponse(
+        request=request,
+        name="nfc.html",
+        context={},
+        media_type="text/html; charset=utf-8",
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={},
+        context={"allow_register": get_config().allow_register},
         media_type="text/html; charset=utf-8",
     )
 
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
+    if not get_config().allow_register:
+        # 注册已关闭: 返回明确的说明页, 不再暴露注册表单
+        return HTMLResponse(
+            content=(
+                "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>注册已关闭</title></head>"
+                "<body style=\"font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;"
+                "background:#F8FAFC;color:#0F172A;display:flex;align-items:center;justify-content:center;"
+                "min-height:100vh;margin:0\">"
+                "<div style='background:#fff;border:1px solid #E2E8F0;border-radius:20px;padding:32px 28px;"
+                "max-width:380px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.05)'>"
+                "<div style='font-size:40px;margin-bottom:12px'>🔒</div>"
+                "<h1 style='font-size:19px;margin:0 0 10px'>注册已关闭</h1>"
+                "<p style='font-size:13px;line-height:1.8;color:#64748B;margin:0 0 20px'>"
+                "本系统不开放自助注册，账号由管理员统一创建。<br>如需使用请联系系统管理员。</p>"
+                "<a href='/login' style='display:inline-block;padding:11px 22px;border-radius:12px;"
+                "background:linear-gradient(135deg,#3B82F6,#2563EB);color:#fff;text-decoration:none;"
+                "font-weight:600;font-size:15px'>前往登录</a></div></body></html>"
+            ),
+            status_code=403,
+        )
     return templates.TemplateResponse(
         request=request,
         name="register.html",
-        context={},
+        context={"allow_register": True},
         media_type="text/html; charset=utf-8",
     )
 
@@ -172,6 +239,13 @@ async def api_login(req: LoginRequest):
 
 @app.post("/api/auth/register")
 async def api_register(req: RegisterRequest):
+    if not get_config().allow_register:
+        # 注册已关闭: 明确拒绝, 不创建任何账号
+        logger.warning("拒绝注册请求 (注册功能已关闭): %s", req.username)
+        return JSONResponse(
+            status_code=403,
+            content={"code": -1, "msg": "本系统已关闭自助注册，账号请由管理员在后台创建"},
+        )
     try:
         res = register_user(
             username=req.username,
@@ -597,19 +671,20 @@ async def set_card_mode(body: dict):
 @app.get("/api/firmware/download")
 async def download_firmware_bin():
     from fastapi.responses import FileResponse
-    bin_path = Path(r"c:\Users\p\Desktop\ai 卡片\firmware\FoloToy-AI-Passport-full.bin")
+    # 固件目录位于包目录的兄弟目录 (仓库根/firmware), 不写死绝对路径以便跨平台部署
+    bin_path = BASE_DIR.parent / "firmware" / "FoloToy-AI-Passport-full.bin"
     if bin_path.exists():
         return FileResponse(path=str(bin_path), filename="FoloToy-AI-Passport-full.bin", media_type="application/octet-stream")
-    return {"code": -1, "msg": "固件文件未找到"}
+    return {"code": -1, "msg": f"固件文件未找到: {bin_path}"}
 
 
 @app.get("/api/firmware/download_zip")
 async def download_firmware_zip():
     from fastapi.responses import FileResponse
-    zip_path = Path(r"c:\Users\p\Desktop\ai 卡片\firmware\AI-Passport-Firmware-Package.zip")
+    zip_path = BASE_DIR.parent / "firmware" / "AI-Passport-Firmware-Package.zip"
     if zip_path.exists():
         return FileResponse(path=str(zip_path), filename="AI-Passport-Firmware-Package.zip", media_type="application/zip")
-    return {"code": -1, "msg": "固件压缩包未找到"}
+    return {"code": -1, "msg": f"固件压缩包未找到: {zip_path}"}
 
 
 @app.get("/api/nfc/cards")
@@ -1120,3 +1195,66 @@ async def websocket_onebot_reverse(websocket: WebSocket):
         logger.info("OneBot 反向 WebSocket 连接断开")
     except Exception as e:
         logger.warning(f"OneBot WS 异常: {e}")
+
+
+@app.websocket("/ws/card")
+async def websocket_card_link(websocket: WebSocket):
+    """硬件胸卡 WebSocket 桥接通道。
+
+    目的：让胸卡复用 443 端口（由 nginx 终止 TLS），从而不必在云安全组额外放行 5566。
+    协议与 5566 裸 TCP 完全一致：每行一条 JSON（NDJSON），只是承载在 WebSocket 文本帧上。
+
+    连接方式: wss://ai.shuoyunqi.online/ws/card?token=<CARD_WS_TOKEN>
+    当 CARD_WS_TOKEN 未配置时不做校验（仅建议局域网调试使用）。
+    """
+    cfg = get_config()
+    token = websocket.query_params.get("token", "")
+    if cfg.card_ws_token and token != cfg.card_ws_token:
+        # 如实拒绝, 不建立任何通道
+        await websocket.close(code=1008, reason="invalid device token")
+        logger.warning("硬件胸卡 WS 连接被拒绝: 设备令牌不正确 (来自 %s)", websocket.client)
+        return
+
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    transport = WsTransport(websocket, loop)
+    card_bridge = get_card_bridge()
+    card_bridge.add_transport(transport, send_initial_frame=False)
+    logger.info("✔ 硬件胸卡已通过 WebSocket 建立桥接通道 (来自 %s)", websocket.client)
+
+    # 报文处理放在独立线程: CardBridge 是线程模型, 且其广播会阻塞等待发送结果,
+    # 直接跑在事件循环里会造成自等死锁。
+    inbox: "queue.Queue" = queue.Queue()
+
+    def _worker():
+        while True:
+            try:
+                line = inbox.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            try:
+                card_bridge._process_message(line, transport)
+            except Exception as pe:
+                logger.warning("处理胸卡 WS 报文异常: %s", pe)
+
+    worker = threading.Thread(target=_worker, daemon=True)
+    worker.start()
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            # 一帧内可能包含多行 NDJSON（固件会按行聚合后发送）
+            for line in raw.split("\n"):
+                line = line.strip()
+                if line:
+                    inbox.put(line)
+    except WebSocketDisconnect:
+        logger.info("硬件胸卡 WebSocket 通道已断开")
+    except Exception as e:
+        logger.warning("硬件胸卡 WebSocket 通道异常: %s", e)
+    finally:
+        inbox.put(None)
+        worker.join(timeout=3)
+        card_bridge.remove_transport(transport)

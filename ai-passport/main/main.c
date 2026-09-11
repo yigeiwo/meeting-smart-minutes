@@ -3,7 +3,8 @@
 // 按键语义(全局统一):
 //   上/下 短按   菜单中=移动选中项;演示页中=该页自定义
 //   确定  短按   菜单中=进入选中项;演示页中=该页自定义
-//   确定  长按   演示页中=返回菜单(由本文件统一拦截)
+//   上键  长按/双击  演示页中=返回主功能菜单(由本文件统一拦截,与屏幕提示"长按上键 菜单"一致)
+//   确定  长按   菜单中=直达飞书会议录音页
 #include "bsp_i2c.h"
 #include "bsp_display.h"
 #include "bsp_button.h"
@@ -12,6 +13,7 @@
 #include "bsp_pins.h"      // 错误日志里要打印 BSP_LCD_* 引脚号
 #include "demo.h"
 #include "ble_prov.h"
+#include "card_link.h"
 #include "ui_pixel.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -73,7 +75,7 @@ static void menu_build(void) {
     lv_obj_t *hint = lv_label_create(s_menu_scr);
     lv_obj_set_style_text_font(hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(0x334155), 0);
-    lv_label_set_text(hint, "上下键: 移动   OK: 进入飞书");
+    lv_label_set_text(hint, "上下键 移动   OK 进入");
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     menu_refresh();
@@ -96,6 +98,8 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
         // 中间键 (OK) 彻底解耦，专职用于业务操作 (录音)，零冲突、零误触
         if (btn == BSP_BTN_UP && (ev == BSP_BTN_LONG || ev == BSP_BTN_DOUBLE)) {
             ESP_LOGI(TAG, "上键触发返回主功能菜单: btn=%d, ev=%d", btn, ev);
+            // 真实通知工作台: 卡片已返回功能菜单 (工作台同步切换为 MENU 画面)
+            card_link_send_combo_menu();
             DEMOS[s_active].exit();
             enter_menu();
         } else {
@@ -163,6 +167,10 @@ void app_main(void) {
 
     // 启动后台 BLE 蓝牙配网监听服务 (广播名称 FoloPassport, Service 0xFFF0, 自动恢复 NVS 历史网络)
     ble_prov_start();
+
+    // 启动真实 TCP/NDJSON 桥接客户端: 连上电脑工作台的 5566 端口,
+    // 上行录音音频/电量/状态, 下行接收真实会议纪要与反向指令
+    card_link_start();
 
     ESP_LOGI(TAG, "就绪: 飞书会议卡片直达模式与 BLE 配网监听已激活");
 }

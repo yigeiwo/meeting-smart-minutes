@@ -4,6 +4,7 @@ import time
 import socket
 import struct
 import base64
+import wave
 import os
 import threading
 import logging
@@ -28,6 +29,21 @@ def get_font(size: int = 14) -> ImageFont.FreeTypeFont:
         except Exception:
             pass
     return ImageFont.load_default()
+
+
+def build_summary_event(summary_data: Dict[str, Any], event_name: str = "summary") -> Dict[str, Any]:
+    """构造下发给硬件胸卡的真实纪要事件 (标题 / 飞书云文档 / 待办 / 决议)。
+
+    与固件 main/card_link.c 的解析字段严格一致，卡片据此在屏幕上渲染真实内容。
+    """
+    return {
+        "event": event_name,
+        "title": summary_data.get("title", "会议纪要"),
+        "doc_url": summary_data.get("doc_url", "") or "",
+        "todos": summary_data.get("todos", []) or [],
+        "decisions": summary_data.get("decisions", []) or [],
+        "timestamp": time.time(),
+    }
 
 
 # ================= 🎴 AI Passport 核心功能模式定义 (含 NFC 门禁与蓝牙音频) =================
@@ -105,6 +121,9 @@ class CardBridge:
         self.port = port
         self.server_socket: Optional[socket.socket] = None
         self.clients: List[socket.socket] = []
+        # 已通过 hello 自报身份的硬件胸卡连接: 不向其推送 lcd_frame 位图帧
+        # (位图帧每秒约 100KB, 会与卡片上行的真实录音音频争抢 Wi-Fi 带宽, 导致丢帧)
+        self.hw_clients: set = set()
         self._lock = threading.Lock()
         self.is_running = False
 
@@ -170,6 +189,108 @@ class CardBridge:
         self.on_record_stop_callbacks: List[Callable] = []
         self.on_request_summary_callbacks: List[Callable] = []
 
+        # ================= 🎙️ 硬件卡片真实音频上行 (TCP 5566 / NDJSON) =================
+        # 卡片以 {"type":"audio","pcm":"<base64 16k/16bit/单声道>"} 实时推流,
+        # 这里直接落盘为真实 .wav 文件, 录音结束后交由真实 AI 流水线提炼。
+        self._card_wav: Optional[wave.Wave_write] = None
+        self._card_wav_path: Optional[Path] = None
+        self._card_audio_lock = threading.Lock()
+        self._card_audio_bytes = 0
+        self._card_audio_frames = 0
+        self._card_audio_bad = 0
+        self._card_audio_last_seq = -1
+        self.card_sample_rate = 16000
+        self.card_channels = 1
+        self.card_sample_width = 2
+
+    # ================= 🎙️ 卡片真实音频落盘 =================
+
+    def _open_card_wav_locked(self) -> None:
+        """(需持有 _card_audio_lock) 新建一个真实 wav 文件用于接收卡片音频"""
+        from .config import get_config
+        cfg = get_config()
+        records = Path(cfg.records_dir)
+        records.mkdir(parents=True, exist_ok=True)
+        name = f"card_{time.strftime('%Y%m%d_%H%M%S')}.wav"
+        self._card_wav_path = records / name
+        self._card_wav = wave.open(str(self._card_wav_path), "wb")
+        self._card_wav.setnchannels(self.card_channels)
+        self._card_wav.setsampwidth(self.card_sample_width)
+        self._card_wav.setframerate(self.card_sample_rate)
+        self._card_audio_bytes = 0
+        self._card_audio_frames = 0
+        self._card_audio_bad = 0
+        self._card_audio_last_seq = -1
+        logger.info(f"🎙️ 已开始接收硬件卡片真实录音 -> {self._card_wav_path}")
+
+    def start_card_recording(self) -> None:
+        """卡片上报 record_start: 新建真实录音文件"""
+        with self._card_audio_lock:
+            self._close_card_wav_locked()
+            self._open_card_wav_locked()
+
+    def _close_card_wav_locked(self) -> Optional[Path]:
+        """(需持有 _card_audio_lock) 关闭并返回刚写好的 wav 路径"""
+        path = None
+        if self._card_wav is not None:
+            try:
+                self._card_wav.close()
+                path = self._card_wav_path
+                logger.info(
+                    f"🎙️ 卡片录音落盘完成: {path} (PCM {self._card_audio_bytes} 字节, "
+                    f"{self._card_audio_frames} 帧, 解码失败 {self._card_audio_bad} 帧)"
+                )
+            except Exception as e:
+                logger.error(f"关闭卡片录音文件失败: {e}")
+            self._card_wav = None
+        return path
+
+    def finish_card_recording(self) -> Optional[Path]:
+        """卡片上报 record_stop: 收尾并返回真实 wav 路径"""
+        with self._card_audio_lock:
+            return self._close_card_wav_locked()
+
+    def _ingest_card_audio(self, b64: str, seq) -> None:
+        """把卡片的真实音频帧解码写入 wav (绝不伪造: 解码失败如实计数)"""
+        if not b64:
+            return
+        try:
+            pcm = base64.b64decode(b64, validate=False)
+        except Exception as e:
+            logger.warning(f"卡片音频帧 base64 解码失败: {e}")
+            with self._card_audio_lock:
+                self._card_audio_bad += 1
+            return
+
+        with self._card_audio_lock:
+            if isinstance(seq, int):
+                if self._card_audio_last_seq >= 0 and seq != self._card_audio_last_seq + 1:
+                    logger.warning(
+                        f"卡片音频帧序号不连续: 期望 {self._card_audio_last_seq + 1}, 实际 {seq}"
+                    )
+                self._card_audio_last_seq = seq
+            if self._card_wav is None:
+                # 卡片未先发 record_start 就直接推流: 自动开一段真实录音, 不丢数据
+                self._open_card_wav_locked()
+            try:
+                self._card_wav.writeframes(pcm)
+                self._card_audio_bytes += len(pcm)
+                self._card_audio_frames += 1
+            except Exception as e:
+                logger.error(f"写入卡片录音失败: {e}")
+                self._card_audio_bad += 1
+
+    def get_card_audio_stats(self) -> Dict[str, Any]:
+        with self._card_audio_lock:
+            return {
+                "path": str(self._card_wav_path) if self._card_wav_path else "",
+                "recording": self._card_wav is not None,
+                "pcm_bytes": self._card_audio_bytes,
+                "frames": self._card_audio_frames,
+                "decode_failed": self._card_audio_bad,
+                "seconds": round(self._card_audio_bytes / (self.card_sample_rate * self.card_channels * self.card_sample_width), 2),
+            }
+
     def start(self):
         if self.is_running:
             return
@@ -219,6 +340,30 @@ class CardBridge:
                     logger.error(f"桥接服务 accept 异常: {e}")
                 break
 
+    def add_transport(self, transport, send_initial_frame: bool = False):
+        """登记一个已建立的外部传输通道 (例如 wss:///ws/card 的 WsTransport)。
+
+        transport 只需实现 sendall(bytes) 与 close()，与原始 socket 接口一致。
+        send_initial_frame=False 时不补发初始位图帧，避免对硬件胸卡造成 100KB 突发。
+        """
+        with self._lock:
+            self.clients.append(transport)
+        self.battery_soc = 85
+        if send_initial_frame:
+            self.render_and_send_frame()
+        logger.info("硬件传输通道已登记, 当前在线客户端数: %d" % len(self.clients))
+
+    def remove_transport(self, transport):
+        with self._lock:
+            if transport in self.clients:
+                self.clients.remove(transport)
+            self.hw_clients.discard(transport)
+        try:
+            transport.close()
+        except Exception:
+            pass
+        logger.info("硬件传输通道已移除, 当前在线客户端数: %d" % len(self.clients))
+
     def _client_handler(self, client_sock: socket.socket, addr):
         buffer = ""
         client_sock.settimeout(120.0)
@@ -239,6 +384,7 @@ class CardBridge:
             with self._lock:
                 if client_sock in self.clients:
                     self.clients.remove(client_sock)
+                self.hw_clients.discard(client_sock)
             try:
                 client_sock.close()
             except Exception:
@@ -277,6 +423,26 @@ class CardBridge:
                 self._start_recording()
             elif msg_type == "record_stop":
                 self._stop_recording()
+            elif msg_type == "audio":
+                # 硬件卡片真实音频上行: 直接落盘, 录音结束后交 AI 流水线
+                self._ingest_card_audio(msg.get("pcm", ""), msg.get("seq"))
+            elif msg_type == "hello":
+                # 标记为真实硬件胸卡: 之后不再向它推送 lcd_frame 位图帧, 把带宽让给音频上行
+                with self._lock:
+                    self.hw_clients.add(client_sock)
+                logger.info(
+                    "AI Passport 硬件卡片握手: fw=%s, mac=%s, ssid=%s (后续不再推送位图帧)",
+                    msg.get("fw", "-"), msg.get("mac", "-"), msg.get("ssid", "-"),
+                )
+                self.send_to_client(client_sock, {
+                    "event": "hello_ack",
+                    "server": "feishu_meeting_tool",
+                    "bridge_port": self.port,
+                    "audio": {"sample_rate": self.card_sample_rate,
+                              "channels": self.card_channels,
+                              "sample_width": self.card_sample_width},
+                })
+                self.render_and_send_frame()
             elif msg_type == "fetch_summary":
                 self.render_and_send_frame()
             elif msg_type == "ping":
@@ -559,9 +725,13 @@ class CardBridge:
                     self.render_and_send_frame()
                     break
 
-    def _start_recording(self):
+    def _start_recording(self, strict_audio: bool = True):
         self.state = "RECORDING"
         self.record_start_time = time.time()
+        # 硬件卡片路径: 新建真实录音文件, 卡片随后推上来的 PCM 会实时写入这里。
+        # 非硬件路径 (网页控制台手动触发) 不建文件, 避免产生空的 card_*.wav 干扰历史回退。
+        if strict_audio:
+            self.start_card_recording()
         self.render_and_send_frame()
 
         for cb in self.on_record_start_callbacks:
@@ -580,16 +750,46 @@ class CardBridge:
             if self.state == "RECORDING":
                 self.render_and_send_frame()
 
-    def _stop_recording(self):
+    def _stop_recording(self, strict_audio: bool = True):
+        """停止录音。
+
+        strict_audio=True  : 硬件卡片路径。必须有卡片真实上行的音频, 否则如实失败,
+                             绝不拿 records 目录里别的录音冒充 (严禁伪造成功)。
+        strict_audio=False : 网页控制台手动触发路径, 沿用历史行为 (取最近的 wav)。
+        """
         if self.state != "RECORDING":
             return
         self.record_duration = int(time.time() - self.record_start_time)
         self.state = "PROCESSING"
         self.render_and_send_frame()
 
-        threading.Thread(target=self._run_auto_summary_pipeline, daemon=True).start()
+        # 收尾真实录音文件, 并把该文件作为本次提炼的唯一音频来源
+        card_wav = self.finish_card_recording()
+        stats = self.get_card_audio_stats()
+        if card_wav is None or stats.get("pcm_bytes", 0) <= 0:
+            if strict_audio:
+                # 没有收到任何真实音频: 如实失败, 绝不拿别的录音冒充
+                msg = "未收到硬件卡片上传的音频数据 (PCM 0 字节), 无法提炼"
+                logger.error(msg)
+                self.state = "IDLE"
+                self.render_and_send_frame()
+                self.broadcast({"event": "pipeline_result", "ok": False, "msg": msg})
+                return
+            logger.warning("无卡片音频上行; 非硬件路径回退为 records 目录中最近的 wav")
+            threading.Thread(
+                target=self._run_auto_summary_pipeline, args=(None,), daemon=True
+            ).start()
+            return
 
-    def _run_auto_summary_pipeline(self):
+        logger.info(
+            "本次卡片录音: %s (%.2f 秒, %s 帧, 解码失败 %s 帧)",
+            card_wav, stats.get("seconds", 0), stats.get("frames", 0), stats.get("decode_failed", 0),
+        )
+        threading.Thread(
+            target=self._run_auto_summary_pipeline, args=(str(card_wav),), daemon=True
+        ).start()
+
+    def _run_auto_summary_pipeline(self, wav_path: Optional[str] = None):
         try:
             from .config import get_config
             from .ai_summarizer import AISummarizer
@@ -603,10 +803,15 @@ class CardBridge:
                 base_url=cfg.llm_base_url,
             )
             records_path = Path(cfg.records_dir)
-            wav_files = sorted(list(records_path.glob("*.wav")), key=lambda p: p.stat().st_mtime, reverse=True)
-            if not wav_files:
-                raise FileNotFoundError("未在 records 目录找到卡片录音音频文件 (.wav)")
-            target_wav = wav_files[0]
+            if wav_path:
+                target_wav = Path(wav_path)
+                if not target_wav.exists() or target_wav.stat().st_size <= 44:
+                    raise FileNotFoundError(f"硬件卡片录音文件无效或为空: {target_wav}")
+            else:
+                wav_files = sorted(list(records_path.glob("*.wav")), key=lambda p: p.stat().st_mtime, reverse=True)
+                if not wav_files:
+                    raise FileNotFoundError("未在 records 目录找到卡片录音音频文件 (.wav)")
+                target_wav = wav_files[0]
             logger.info(f"正在转写卡片真实录音文件: {target_wav.name}")
             transcript = pipeline.transcribe(str(target_wav))
 
@@ -655,19 +860,19 @@ class CardBridge:
             self.state = "SUMMARIZED"
             self.render_and_send_frame()
 
-            # 4. 广播给前端 Web 工作台及模拟器客户端
-            self.broadcast({
-                "event": "meeting_processed",
-                "title": summary_data.get("title", "会议纪要"),
-                "doc_url": summary_data.get("doc_url", ""),
-                "todos": summary_data.get("todos", []),
-                "decisions": summary_data.get("decisions", []),
-            })
+            # 4. 广播给前端 Web 工作台与硬件卡片 (卡片据此渲染真实纪要)
+            self.broadcast(build_summary_event(summary_data, event_name="meeting_processed"))
 
         except Exception as e:
             logger.error(f"录音自动总结流水线异常: {e}", exc_info=True)
             self.state = "IDLE"
             self.render_and_send_frame()
+            # 如实把失败原因回传给硬件卡片, 由卡片屏幕如实展示, 绝不伪造成功
+            self.broadcast({
+                "event": "pipeline_result",
+                "ok": False,
+                "msg": f"{type(e).__name__}: {e}"[:120],
+            })
 
     def push_meeting_summary_to_card(self, summary_data: Dict[str, Any]):
         self.current_summary = summary_data
@@ -675,6 +880,9 @@ class CardBridge:
         self.current_mode = "meeting"
         self.state = "SUMMARIZED"
         self.render_and_send_frame()
+        # 把真实纪要要点(标题/云文档/待办/决议)同步下发给硬件胸卡,
+        # 卡片屏幕据此渲染真实内容 (此前只广播了位图帧, 卡片拿不到结构化数据)
+        self.broadcast(build_summary_event(summary_data, event_name="summary"))
 
     def render_and_send_frame(self):
         frame_msg = self._generate_lcd_frame()
@@ -983,9 +1191,13 @@ class CardBridge:
     def broadcast(self, data: Dict[str, Any]):
         payload = json.dumps(data, separators=(",", ":")) + "\n"
         encoded = payload.encode("utf-8")
+        is_lcd_frame = data.get("type") == "lcd_frame"
         with self._lock:
             dead_clients = []
             for client in self.clients:
+                # 真实硬件胸卡不需要位图帧 (它自己渲染 LVGL 界面), 跳过以免占用其上行带宽
+                if is_lcd_frame and client in self.hw_clients:
+                    continue
                 try:
                     client.sendall(encoded)
                 except Exception:
@@ -993,6 +1205,7 @@ class CardBridge:
             for dc in dead_clients:
                 if dc in self.clients:
                     self.clients.remove(dc)
+                self.hw_clients.discard(dc)
                 try:
                     dc.close()
                 except Exception:
@@ -1033,6 +1246,8 @@ class CardBridge:
             "current_summary": self.current_summary,
             "current_todo_index": self.current_todo_index,
             "frame_b64": frame.get("frame_b64", ""),
+            # 硬件卡片真实音频上行统计 (工作台前端可直接展示链路是否真的在传音频)
+            "card_audio": self.get_card_audio_stats(),
         }
 
     def trigger_event(self, event_name: str) -> Dict[str, Any]:
@@ -1074,10 +1289,10 @@ class CardBridge:
         # 会议录音启停
         elif event_name == "record_start":
             self.broadcast({"cmd": "record_start", "timestamp": time.time()})
-            self._start_recording()
+            self._start_recording(strict_audio=False)
         elif event_name == "record_stop":
             self.broadcast({"cmd": "record_stop", "timestamp": time.time()})
-            self._stop_recording()
+            self._stop_recording(strict_audio=False)
         elif event_name == "fetch_summary":
             self.render_and_send_frame()
 

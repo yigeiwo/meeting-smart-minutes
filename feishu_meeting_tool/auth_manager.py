@@ -176,6 +176,106 @@ def register_user(username: str, password: str, display_name: Optional[str] = No
     }
 
 
+def upsert_user(username: str, password: str, display_name: Optional[str] = None,
+                email: Optional[str] = None, role: str = "admin") -> Dict[str, Any]:
+    """创建或更新账号 (管理员建号 / 重置密码用)。
+
+    - 账号不存在: 走正常注册流程创建；
+    - 账号已存在: 重置其密码、角色与显示名，并同步 PostgreSQL 与本地 JSON 两份存储。
+    返回 {"code": 0, "msg": ..., "user": {...}, "created": bool}
+    """
+    username = (username or "").strip()
+    password = (password or "").strip()
+
+    if not username or len(username) < 3 or len(username) > 20:
+        return {"code": -1, "msg": "用户名长度需在 3 到 20 个字符之间"}
+    if not re.match(r"^[a-zA-Z0-9_\-]+$", username):
+        return {"code": -1, "msg": "用户名只能包含英文字母、数字、下划线(_)或连字符(-)"}
+    if not password or len(password) < 6:
+        return {"code": -1, "msg": "密码长度至少需要 6 个字符"}
+
+    existing = get_user_by_username(username)
+    if not existing:
+        res = register_user(username=username, password=password,
+                            display_name=display_name, email=email, role=role)
+        if res.get("code") == 0:
+            res["created"] = True
+        return res
+
+    user_id = existing["id"]
+    salt = os.urandom(8).hex()
+    pwd_hash = _hash_password(password, salt)
+    new_display = (display_name or "").strip() or existing.get("display_name") or username
+    new_email = existing.get("email", "") if email is None else email
+    new_role = role or existing.get("role", "user")
+
+    updated = {
+        "id": user_id,
+        "username": username,
+        "display_name": new_display,
+        "email": new_email,
+        "password_hash": pwd_hash,
+        "salt": salt,
+        "role": new_role,
+        "created_at": existing.get("created_at", time.strftime("%Y-%m-%d %H:%M:%S")),
+    }
+
+    # 1) 更新 PostgreSQL
+    try:
+        from .db_engine import get_pg_engine
+        engine = get_pg_engine()
+        if engine:
+            from sqlalchemy import text
+            with engine.begin() as conn:
+                conn.execute(
+                    text("""
+                        UPDATE users
+                           SET password_hash = :password_hash,
+                               salt = :salt,
+                               role = :role,
+                               display_name = :display_name,
+                               email = :email
+                         WHERE id = :id
+                    """),
+                    updated,
+                )
+            logger.info(f"✔ 已在 PostgreSQL 更新账号: {username} ({user_id})")
+    except Exception as e:
+        logger.warning(f"更新 PostgreSQL users 失败: {e}")
+
+    # 2) 同步本地 JSON 备份
+    _ensure_files()
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    except Exception:
+        users = []
+    hit = False
+    for i, u in enumerate(users):
+        if u.get("id") == user_id or (u.get("username", "").strip().lower() == username.lower()):
+            users[i] = updated
+            hit = True
+            break
+    if not hit:
+        users.append(updated)
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+    return {
+        "code": 0,
+        "msg": "账号已更新",
+        "created": False,
+        "user": {
+            "id": user_id,
+            "username": username,
+            "display_name": new_display,
+            "email": new_email,
+            "role": new_role,
+            "created_at": updated["created_at"],
+        },
+    }
+
+
 def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
     user = get_user_by_username(username)
     if not user:
