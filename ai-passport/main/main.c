@@ -11,6 +11,7 @@
 #include "bsp_battery.h"
 #include "bsp_pins.h"      // 错误日志里要打印 BSP_LCD_* 引脚号
 #include "demo.h"
+#include "ble_prov.h"
 #include "ui_pixel.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -159,5 +160,8 @@ void app_main(void) {
         bsp_lvgl_unlock(); 
     }
 
-    ESP_LOGI(TAG, "就绪: 飞书会议卡片直达模式已激活");
+    // 启动后台 BLE 蓝牙配网监听服务 (广播名称 FoloPassport, Service 0xFFF0, 自动恢复 NVS 历史网络)
+    ble_prov_start();
+
+    ESP_LOGI(TAG, "就绪: 飞书会议卡片直达模式与 BLE 配网监听已激活");
 }

@@ -11,6 +11,7 @@ idf_component_register(
          "demo_ble.c"
          "demo_low_power.c"
          "demo_meeting.c"
+         "ble_prov.c"
          "font_chinese_14.c"
     INCLUDE_DIRS "."
     REQUIRES bsp bt esp_event esp_hw_support esp_netif esp_timer esp_wifi nvs_flash

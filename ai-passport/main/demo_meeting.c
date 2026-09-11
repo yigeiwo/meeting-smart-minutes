@@ -7,6 +7,7 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "ble_prov.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdlib.h>
@@ -162,23 +163,46 @@ static void update_ui(void) {
             }
         }
     } else if (s_cur_page == 1) {
-        // --- 第 2 页更新 (真实配对连接与网络看板，局域网真实IP) ---
+        char ip[32] = {0};
+        char ssid[34] = {0};
+        bool connected = ble_prov_is_wifi_connected();
+        ble_prov_get_ip_str(ip, sizeof(ip));
+        ble_prov_get_ssid_str(ssid, sizeof(ssid));
+
         if (s_p2_badge) {
-            lv_label_set_text(s_p2_badge, "[网络] 连接服务就绪");
-            lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0x059669), 0);
+            if (connected) {
+                lv_label_set_text(s_p2_badge, "[网络] 无线网络已连接");
+                lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0x059669), 0);
+            } else {
+                lv_label_set_text(s_p2_badge, "[网络] 等待手机NFC/BLE配网");
+                lv_obj_set_style_text_color(s_p2_badge, lv_color_hex(0xD97706), 0);
+            }
         }
         if (s_p2_url) {
-            // 真实局域网控制台访问地址 (局域网真实IP，绝无假数据)
-            lv_label_set_text(s_p2_url, "http://192.168.0.214:8000");
+            if (connected && strlen(ip) > 0) {
+                lv_label_set_text_fmt(s_p2_url, "http://%s:8000", ip);
+            } else {
+                lv_label_set_text(s_p2_url, "http://192.168.0.214:8000/wifi");
+            }
         }
         if (s_p2_port) {
-            lv_label_set_text(s_p2_port, "通信端口: TCP 5566");
+            if (connected && strlen(ssid) > 0) {
+                lv_label_set_text_fmt(s_p2_port, "热点: %s (已联网)", ssid);
+            } else {
+                lv_label_set_text(s_p2_port, "蓝牙广播: FoloPassport");
+            }
         }
         if (s_p2_mac) {
             lv_label_set_text_fmt(s_p2_mac, "设备硬件: %s", s_mac_str);
         }
         if (s_p2_status) {
-            lv_label_set_text(s_p2_status, "服务状态: 在线已连接");
+            if (connected) {
+                lv_label_set_text(s_p2_status, "服务状态: 在线已连接");
+                lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x16A34A), 0);
+            } else {
+                lv_label_set_text(s_p2_status, "配网状态: 蓝牙可连接待下发");
+                lv_obj_set_style_text_color(s_p2_status, lv_color_hex(0x2563EB), 0);
+            }
         }
     } else if (s_cur_page == 2) {
         // --- 第 3 页更新 (真实多维表格同步状态，严禁模拟假数据) ---

@@ -114,6 +114,16 @@ async def index_page(request: Request):
     )
 
 
+@app.get("/wifi", response_class=HTMLResponse)
+async def wifi_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="wifi_prov.html",
+        context={},
+        media_type="text/html; charset=utf-8",
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(
