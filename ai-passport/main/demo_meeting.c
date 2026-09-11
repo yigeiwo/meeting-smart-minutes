@@ -231,7 +231,7 @@ void demo_meeting_enter(void) {
 
     // Top Battery bar
     s_bat_label = lv_label_create(s_scr);
-    lv_obj_set_style_text_font(s_bat_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_bat_label, &lv_font_montserrat_14, 0);
     lv_obj_align(s_bat_label, LV_ALIGN_TOP_LEFT, 16, 26);
     update_battery();
 
@@ -239,7 +239,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *panel = ui_pixel_panel_create(s_scr, 16, 48, 208, 192, UI_PAPER);
 
     s_tab_label = lv_label_create(panel);
-    lv_obj_set_style_text_font(s_tab_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_tab_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_tab_label, lv_color_hex(0x64748B), 0);
     lv_obj_align(s_tab_label, LV_ALIGN_TOP_MID, 0, 4);
 
@@ -262,7 +262,7 @@ void demo_meeting_enter(void) {
     lv_obj_align(s_content_label, LV_ALIGN_CENTER, 0, 24);
 
     s_hint_label = lv_label_create(panel);
-    lv_obj_set_style_text_font(s_hint_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_hint_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_hint_label, lv_color_hex(0x64748B), 0);
     lv_obj_align(s_hint_label, LV_ALIGN_BOTTOM_MID, 0, -4);
 
