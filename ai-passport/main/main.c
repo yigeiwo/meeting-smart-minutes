@@ -81,9 +81,8 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     if (!bsp_lvgl_lock(500)) return;
 
     if (s_active >= 0) {
-        if ((btn == BSP_BTN_OK && ev == BSP_BTN_LONG) ||
-            (btn == BSP_BTN_UP && ev == BSP_BTN_LONG)) {     // 统一组合键/长按快速返回功能选择菜单
-            ESP_LOGI(TAG, "Triggered return to function selection menu");
+        if (btn == BSP_BTN_OK && ev == BSP_BTN_LONG) {     // 仅长按确定键(1.5秒)返回主菜单，杜绝UP引脚电平干扰
+            ESP_LOGI(TAG, "Triggered return to function selection menu via OK LONG");
             DEMOS[s_active].exit();
             enter_menu();
         } else {

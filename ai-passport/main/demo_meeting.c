@@ -306,6 +306,16 @@ void demo_meeting_exit(void) {
 void demo_meeting_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
     if (ev != BSP_BTN_CLICK) return;
 
+    // 强力消抖与按键切换限速 (至少间隔 400ms)，彻底解决由于 ADC 浮空抖动导致的屏幕自激反复切换
+    static uint32_t s_last_key_tick = 0;
+    uint32_t now_tick = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
+    if (now_tick - s_last_key_tick < 400) {
+        return;
+    }
+    s_last_key_tick = now_tick;
+
+    ESP_LOGI(TAG, "按键生效: btn=%d, 当前看板=%d", btn, s_cur_view);
+
     if (btn == BSP_BTN_OK) {
         ui_pixel_mascot_jump(s_mascot);
         if (s_cur_view == VIEW_RECORDER) {
