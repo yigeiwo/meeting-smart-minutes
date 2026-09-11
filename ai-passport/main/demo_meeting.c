@@ -97,8 +97,10 @@ static void update_ui(void) {
                 lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0x059669), 0);
             }
             if (s_p1_timer) {
+                lv_obj_set_style_text_font(s_p1_timer, &lv_font_montserrat_20, 0);
                 lv_label_set_text(s_p1_timer, "00:00:00");
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(UI_INK), 0);
+                lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
                 lv_label_set_text(s_p1_content,
@@ -106,7 +108,7 @@ static void update_ui(void) {
                     "按 OK 键开始实时会议录音");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "OK: 开始录音   上下键: 翻页");
+                lv_label_set_text(s_p1_hint, "OK: 录音   下键: 切换看板");
             }
         } else if (s_state == MEETING_RECORDING) {
             if (s_p1_badge) {
@@ -116,8 +118,10 @@ static void update_ui(void) {
             if (s_p1_timer) {
                 uint32_t m = s_rec_seconds / 60;
                 uint32_t s = s_rec_seconds % 60;
+                lv_obj_set_style_text_font(s_p1_timer, &lv_font_montserrat_20, 0);
                 lv_label_set_text_fmt(s_p1_timer, "00:%02lu:%02lu", (unsigned long)m, (unsigned long)s);
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0xDC2626), 0);
+                lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
                 lv_label_set_text(s_p1_content,
@@ -133,8 +137,10 @@ static void update_ui(void) {
                 lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0xD97706), 0);
             }
             if (s_p1_timer) {
-                lv_label_set_text(s_p1_timer, "AI 提炼中");
+                lv_obj_set_style_text_font(s_p1_timer, &font_chinese_14, 0);
+                lv_label_set_text(s_p1_timer, "AI 提炼决议生成中...");
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0xD97706), 0);
+                lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
                 lv_label_set_text(s_p1_content,
@@ -150,8 +156,13 @@ static void update_ui(void) {
                 lv_obj_set_style_text_color(s_p1_badge, lv_color_hex(0x2563EB), 0);
             }
             if (s_p1_timer) {
-                lv_label_set_text(s_p1_timer, "已完成");
+                // 使用中文字体显示录音总时长与已完成状态，彻底解决中间几个字空白不显示的问题
+                lv_obj_set_style_text_font(s_p1_timer, &font_chinese_14, 0);
+                lv_label_set_text_fmt(s_p1_timer, "会议总时长 %02lu:%02lu (已完成)", 
+                                      (unsigned long)(s_rec_seconds / 60), 
+                                      (unsigned long)(s_rec_seconds % 60));
                 lv_obj_set_style_text_color(s_p1_timer, lv_color_hex(0x2563EB), 0);
+                lv_obj_align(s_p1_timer, LV_ALIGN_TOP_MID, 0, 50);
             }
             if (s_p1_content) {
                 lv_label_set_text(s_p1_content,
@@ -159,7 +170,7 @@ static void update_ui(void) {
                     "已同步至飞书云文档与群");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "OK: 再次录音   上下键: 翻页");
+                lv_label_set_text(s_p1_hint, "OK: 再次录音   下键: 切换看板");
             }
         }
     } else if (s_cur_page == 1) {
