@@ -33,19 +33,16 @@ jobs:
         with:
           esp_idf_version: v5.5.3
           target: esp32c3
-          path: ai-passport
           command: |
-            idf.py set-target esp32c3
-            idf.py build
-            idf.py merge-bin -o build/FoloToy-AI-Passport-full.bin --fill-flash-size 8MB
+            cd ai-passport
+            chmod +x tools/validate.sh
+            ./tools/validate.sh --firmware
 
       - name: Copy firmware to root release folder
         run: |
           mkdir -p release_bin
           cp ai-passport/build/FoloToy-AI-Passport-full.bin release_bin/FoloToy-AI-Passport-full.bin
-          cp ai-passport/build/bootloader/bootloader.bin release_bin/bootloader.bin
-          cp ai-passport/build/partition_table/partition-table.bin release_bin/partition-table.bin
-          cp ai-passport/build/FoloToy-AI-Passport.bin release_bin/FoloToy-AI-Passport-app.bin
+          cp ai-passport/build/FoloToy-AI-Passport-full.bin release_bin/Feishu-Meeting-Passport-full.bin
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4

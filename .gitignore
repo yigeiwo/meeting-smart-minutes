@@ -50,5 +50,5 @@ desktop.ini
 
 # Subdirectories / packaging copies
 feishu-meeting-ai-suite/
-ai-passport/
+ai-passport/build/
 ai-passport-simulator/
