@@ -92,10 +92,10 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     if (!bsp_lvgl_lock(500)) return;
 
     if (s_active >= 0) {
-        if ((btn == BSP_BTN_OK && ev == BSP_BTN_LONG) ||
-            (btn == BSP_BTN_UP && ev == BSP_BTN_LONG) ||
-            (btn == BSP_BTN_OK && ev == BSP_BTN_DOUBLE)) {     // 长按确定键(700ms)、长按上键或双击确定键均可秒回菜单
-            ESP_LOGI(TAG, "按键触发返回主功能菜单: btn=%d, ev=%d", btn, ev);
+        // 彻底将【返回菜单】职责赋予【最上键 (UP)】：按住半秒或双击直接返回主功能菜单
+        // 中间键 (OK) 彻底解耦，专职用于业务操作 (录音)，零冲突、零误触
+        if (btn == BSP_BTN_UP && (ev == BSP_BTN_LONG || ev == BSP_BTN_DOUBLE)) {
+            ESP_LOGI(TAG, "上键触发返回主功能菜单: btn=%d, ev=%d", btn, ev);
             DEMOS[s_active].exit();
             enter_menu();
         } else {

@@ -108,7 +108,7 @@ static void update_ui(void) {
                     "按 OK 键开始实时会议录音");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "OK: 录音   下键: 切换看板");
+                lv_label_set_text(s_p1_hint, "上键: 菜单   中键: 录音   下键: 换板");
             }
         } else if (s_state == MEETING_RECORDING) {
             if (s_p1_badge) {
@@ -129,7 +129,7 @@ static void update_ui(void) {
                     "音频流式推送到云端网关");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "OK: 结束录音并生成纪要");
+                lv_label_set_text(s_p1_hint, "中键: 结束录音   下键: 换板");
             }
         } else if (s_state == MEETING_PROCESSING) {
             if (s_p1_badge) {
@@ -170,7 +170,7 @@ static void update_ui(void) {
                     "已同步至飞书云文档与群");
             }
             if (s_p1_hint) {
-                lv_label_set_text(s_p1_hint, "OK: 再次录音   长按/双击OK: 菜单");
+                lv_label_set_text(s_p1_hint, "上键: 菜单   中键: 再次录音   下键: 换板");
             }
         }
     } else if (s_cur_page == 1) {
@@ -337,7 +337,7 @@ void demo_meeting_enter(void) {
     s_p1_hint = lv_label_create(s_page[0]);
     lv_obj_set_style_text_font(s_p1_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p1_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(s_p1_hint, "OK: 录音   下键: 换板   长按/双击OK: 菜单");
+    lv_label_set_text(s_p1_hint, "上键: 菜单   中键: 录音   下键: 换板");
     lv_obj_align(s_p1_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
@@ -393,7 +393,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *p2_hint = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(p2_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p2_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p2_hint, "下键: 切换看板   长按/双击OK: 菜单");
+    lv_label_set_text(p2_hint, "上键: 菜单   中键: 录音   下键: 换板");
     lv_obj_align(p2_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
@@ -437,7 +437,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *p3_hint = lv_label_create(s_page[2]);
     lv_obj_set_style_text_font(p3_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p3_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p3_hint, "下键: 切换看板   长按/双击OK: 菜单");
+    lv_label_set_text(p3_hint, "上键: 菜单   中键: 录音   下键: 换板");
     lv_obj_align(p3_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     s_mascot = ui_pixel_mascot_create(s_scr, 101, 248);
