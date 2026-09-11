@@ -61,7 +61,6 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
             .max          = BTN_MV[i][1],
         };
         const button_config_t bc = {
-            .type = BUTTON_TYPE_ADC,
             .long_press_time = 1500,
             .short_press_time = 180,
         };
