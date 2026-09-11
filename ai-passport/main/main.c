@@ -21,14 +21,14 @@ static const char *TAG = "main";
 extern const lv_font_t font_chinese_14;
 
 static const demo_entry_t DEMOS[] = {
-    { "显示测试", demo_display_enter, demo_display_exit, demo_display_key },
+    { "飞书会议", demo_meeting_enter, demo_meeting_exit, demo_meeting_key },
     { "按键测试", demo_button_enter,  demo_button_exit,  demo_button_key  },
+    { "显示测试", demo_display_enter, demo_display_exit, demo_display_key },
     { "音频测试", demo_audio_enter,   demo_audio_exit,   demo_audio_key   },
     { "电池电量", demo_battery_enter, demo_battery_exit, demo_battery_key },
     { "无线网络", demo_wifi_enter,    demo_wifi_exit,    demo_wifi_key    },
     { "蓝牙广播", demo_ble_enter,     demo_ble_exit,     demo_ble_key     },
     { "低功耗",   demo_low_power_enter, demo_low_power_exit, demo_low_power_key },
-    { "飞书会议", demo_meeting_enter, demo_meeting_exit, demo_meeting_key },
 };
 #define DEMO_COUNT (sizeof(DEMOS) / sizeof(DEMOS[0]))
 
@@ -39,7 +39,7 @@ static lv_obj_t *s_menu_scr;
 static lv_obj_t *s_cards[DEMO_COUNT];
 static lv_obj_t *s_rows[DEMO_COUNT];
 static lv_obj_t *s_mascot;
-static int  s_sel;                 // 当前选中项
+static int  s_sel = 0;             // 当前选中项 (默认第1项: 飞书会议)
 static int  s_active = -1;         // 当前所在演示页;-1 = 在菜单
 
 static void menu_refresh(void) {
@@ -72,7 +72,7 @@ static void menu_build(void) {
     lv_obj_t *hint = lv_label_create(s_menu_scr);
     lv_obj_set_style_text_font(hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(0x334155), 0);
-    lv_label_set_text(hint, "上下键: 移动   OK: 进入");
+    lv_label_set_text(hint, "上下键: 移动   OK: 进入飞书");
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     menu_refresh();
@@ -81,6 +81,7 @@ static void menu_build(void) {
 
 static void enter_menu(void) {
     s_active = -1;
+    s_sel = 0; // 默认选中【飞书会议】
     menu_build();
 }
 
@@ -98,18 +99,27 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
         } else {
             DEMOS[s_active].key(btn, ev);
         }
-    } else if (ev == BSP_BTN_CLICK) {
-        if (btn == BSP_BTN_UP)   { s_sel = (s_sel + DEMO_COUNT - 1) % DEMO_COUNT; menu_refresh(); }
-        if (btn == BSP_BTN_DOWN) { s_sel = (s_sel + 1) % DEMO_COUNT;              menu_refresh(); }
-        if (btn == BSP_BTN_OK && s_ok[s_sel]) {
-            s_active = s_sel;
-            ui_pixel_mascot_jump(s_mascot);
+    } else {
+        if (ev == BSP_BTN_CLICK) {
+            if (btn == BSP_BTN_UP)   { s_sel = (s_sel + DEMO_COUNT - 1) % DEMO_COUNT; menu_refresh(); }
+            if (btn == BSP_BTN_DOWN) { s_sel = (s_sel + 1) % DEMO_COUNT;              menu_refresh(); }
+            if (btn == BSP_BTN_OK && s_ok[s_sel]) {
+                s_active = s_sel;
+                ui_pixel_mascot_jump(s_mascot);
+                lv_obj_delete(s_menu_scr);
+                s_menu_scr = NULL;
+                s_mascot = NULL;
+                DEMOS[s_active].enter();
+            } else if (btn == BSP_BTN_UP || btn == BSP_BTN_DOWN) {
+                ui_pixel_mascot_jump(s_mascot);
+            }
+        } else if (btn == BSP_BTN_OK && ev == BSP_BTN_LONG) {
+            // 在菜单中长按确定键，直接返回飞书会议录音
+            s_active = 0;
             lv_obj_delete(s_menu_scr);
             s_menu_scr = NULL;
             s_mascot = NULL;
             DEMOS[s_active].enter();
-        } else if (btn == BSP_BTN_UP || btn == BSP_BTN_DOWN) {
-            ui_pixel_mascot_jump(s_mascot);
         }
     }
     bsp_lvgl_unlock();
@@ -125,8 +135,7 @@ void app_main(void) {
     bsp_i2c_init();
     bsp_i2c_scan();
 
-    // 屏幕是本 demo 的 UI 载体,失败就没有菜单可言 —— 打清楚日志后退出,
-    // 不做"串口菜单"降级(那会让本文件复杂一倍,违背参考示例的初衷)。
+    // 屏幕是本 demo 的 UI 载体,失败就没有菜单可言
     if (bsp_display_init() != ESP_OK || !bsp_lvgl_init()) {
         ESP_LOGE(TAG, "显示/LVGL 初始化失败,demo 无法继续。"
                       "检查 SPI 接线(MOSI=%d SCLK=%d CS=%d DC=%d BL=%d)",
@@ -135,21 +144,20 @@ void app_main(void) {
     }
     bsp_display_backlight(100);
 
-    // 其余外设单项失败不阻塞:菜单里标 [FAIL],其他项照常可测。
-    s_ok[0] = true;                                   // Display 已确认可用
+    // 外设初始化与状态登记 (默认全可用)
+    for (size_t i = 0; i < DEMO_COUNT; i++) {
+        s_ok[i] = true;
+    }
     s_ok[1] = (bsp_button_init(on_key, NULL) == ESP_OK);
-    s_ok[2] = (bsp_audio_init() == ESP_OK);
-    s_ok[3] = (bsp_battery_init() == ESP_OK);
-    s_ok[4] = true;                                    // 页面内按需初始化并显示错误
-    s_ok[5] = true;
-    s_ok[6] = true;
+    s_ok[3] = (bsp_audio_init() == ESP_OK);
+    s_ok[4] = (bsp_battery_init() == ESP_OK);
+
     if (bsp_lvgl_lock(1000)) { 
-        // 默认直接开机进入 Feishu 飞书会议智能页面，长按 OK / UP+DN 随时返回主菜单
-        s_active = 7;
+        // 默认直接开机进入飞书会议智能页面
+        s_active = 0;
         DEMOS[s_active].enter();
         bsp_lvgl_unlock(); 
     }
 
-    ESP_LOGI(TAG, "就绪:Display=%d Button=%d Audio=%d Battery=%d [默认进入 Feishu 飞书会议卡片]",
-             s_ok[0], s_ok[1], s_ok[2], s_ok[3]);
+    ESP_LOGI(TAG, "就绪: 飞书会议卡片直达模式已激活");
 }
