@@ -1,8 +1,4 @@
-// main/demo_meeting.c - Feishu Meeting Smart Minutes Suite
-// Full support for:
-// 1. Crystal-clear typography without font glyph corruption
-// 2. Real-time battery indicator (CW2017 SOC% & Voltage)
-// 3. Pairing Link & Web Console Connection Board
+// main/demo_meeting.c - 飞书会议智能妙记专属胸卡固件 (100% 中文原生字库)
 #include "demo_meeting.h"
 #include "bsp_audio.h"
 #include "bsp_display.h"
@@ -18,6 +14,9 @@
 #include <stdio.h>
 
 static const char *TAG = "demo_meeting";
+
+// 引用原生中文高质量点阵矢量字库 (14px 黑体)
+extern const lv_font_t font_chinese_14;
 
 #define SAMPLE_RATE     16000
 #define CHUNK_SAMPLES   512
@@ -38,7 +37,6 @@ typedef enum {
 
 static lv_obj_t   *s_scr = NULL;
 static lv_obj_t   *s_bat_label = NULL;
-static lv_obj_t   *s_bat_bar = NULL;
 static lv_obj_t   *s_tab_label = NULL;
 static lv_obj_t   *s_status_badge = NULL;
 static lv_obj_t   *s_timer_label = NULL;
@@ -55,10 +53,10 @@ static int s_todo_page = 0;
 static char s_mac_str[24] = "4C:11:AE:30:DE:3C";
 
 static const char *s_sample_todos[] = {
-    "1. Complete Q3 Product Architecture Review",
-    "2. Deploy Feishu Smart Minutes Bridge to AWS",
-    "3. Sync Meeting Action Items to Feishu Base",
-    "4. AI Passport Hardware NFC & BT Testing"
+    "1. 落实技术架构方案评审决议",
+    "2. 部署飞书智能妙记云端桥接服务",
+    "3. 同步会议待办至飞书多维表格",
+    "4. 完成胸卡硬件 NFC 与蓝牙测试"
 };
 #define TODO_COUNT 4
 
@@ -68,14 +66,14 @@ static void update_battery(void) {
     int mv  = bsp_battery_mv();
 
     if (soc < 0) {
-        lv_label_set_text(s_bat_label, "BAT: USB PWR");
-        lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0x38BDF8), 0);
+        lv_label_set_text(s_bat_label, "电量: USB供电中");
+        lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0x0284C7), 0);
     } else {
-        lv_label_set_text_fmt(s_bat_label, "BAT: %d%% (%dmV)", soc, mv > 0 ? mv : 4150);
+        lv_label_set_text_fmt(s_bat_label, "电量: %d%% (%dmV)", soc, mv > 0 ? mv : 4150);
         if (soc < 20) {
-            lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0xEF4444), 0);
+            lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0xDC2626), 0);
         } else {
-            lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0x10B981), 0);
+            lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0x16A34A), 0);
         }
     }
 }
@@ -89,35 +87,35 @@ static void update_ui(void) {
 
     update_battery();
 
-    // Tab Header
+    // 顶部当前看板标签
     if (s_tab_label) {
         if (s_cur_view == VIEW_RECORDER) {
-            lv_label_set_text(s_tab_label, "[1/3] MEETING RECORDER");
+            lv_label_set_text(s_tab_label, "[1/3] 飞书会议录音与纪要");
         } else if (s_cur_view == VIEW_PAIRING_LINK) {
-            lv_label_set_text(s_tab_label, "[2/3] PAIRING & SERVER LINK");
+            lv_label_set_text(s_tab_label, "[2/3] 配对连接与网络看板");
         } else if (s_cur_view == VIEW_TODOS) {
-            lv_label_set_text_fmt(s_tab_label, "[3/3] ACTION TODOS (%d/%d)", s_todo_page + 1, TODO_COUNT);
+            lv_label_set_text_fmt(s_tab_label, "[3/3] 待办事项落实 (%d/%d)", s_todo_page + 1, TODO_COUNT);
         }
     }
 
     if (s_cur_view == VIEW_RECORDER) {
-        // Mode 1: Meeting Recorder
+        // 看板 1: 会议录音与纪要提炼
         if (s_state == MEETING_IDLE) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "● IDLE [READY]");
+                lv_label_set_text(s_status_badge, "● 待命中 [就绪]");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x059669), 0);
             }
             if (s_timer_label) lv_label_set_text(s_timer_label, "00:00:00");
             if (s_content_label) {
                 lv_label_set_text(s_content_label,
-                    "Feishu Smart Minutes\n"
-                    "Press OK to Record Voice\n"
-                    "Audio -> Realtime AI Minutes");
+                    "飞书会议智能妙记\n"
+                    "请按 OK 键开始会议录音\n"
+                    "音频实时转写与 AI 总结");
             }
-            if (s_hint_label) lv_label_set_text(s_hint_label, "OK: Start Rec   UP/DN: Switch Tab");
+            if (s_hint_label) lv_label_set_text(s_hint_label, "OK: 开始录音   上下键: 翻页");
         } else if (s_state == MEETING_RECORDING) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "● REC [LIVE]");
+                lv_label_set_text(s_status_badge, "● 录音中 [正在转写]");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0xDC2626), 0);
             }
             if (s_timer_label) {
@@ -127,64 +125,64 @@ static void update_ui(void) {
             }
             if (s_content_label) {
                 lv_label_set_text(s_content_label,
-                    "Recording via ES8311 I2S\n"
-                    "Capturing Discussion Audio\n"
-                    "Streaming to Local Gateway...");
+                    "正在通过麦克风录音\n"
+                    "实时采集会议讨论音频\n"
+                    "流式推送至智能妙记网关...");
             }
-            if (s_hint_label) lv_label_set_text(s_hint_label, "OK: Finish & Summarize");
+            if (s_hint_label) lv_label_set_text(s_hint_label, "OK: 结束录音并生成纪要");
         } else if (s_state == MEETING_PROCESSING) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "⚡ AI PROCESSING...");
+                lv_label_set_text(s_status_badge, "⚡ AI 智能提炼处理中...");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0xD97706), 0);
             }
             if (s_content_label) {
                 lv_label_set_text(s_content_label,
-                    "Extracting Key Decisions...\n"
-                    "Generating Meeting Minutes\n"
-                    "Syncing to Feishu Docs...");
+                    "AI 正在提炼核心决议...\n"
+                    "生成结构化会议纪要\n"
+                    "正在同步至飞书云文档...");
             }
-            if (s_hint_label) lv_label_set_text(s_hint_label, "Please wait...");
+            if (s_hint_label) lv_label_set_text(s_hint_label, "请稍候...");
         } else if (s_state == MEETING_COMPLETED) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "✔ SUMMARIZED");
+                lv_label_set_text(s_status_badge, "✔ 会议纪要已生成并同步");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x2563EB), 0);
             }
             if (s_content_label) {
                 lv_label_set_text(s_content_label,
-                    "Meeting Minutes Generated!\n"
-                    "Pushed to Feishu / DingTalk\n"
-                    "Press DN for Action Items");
+                    "会议纪要已自动生成！\n"
+                    "已推送到飞书与机器人群\n"
+                    "按向下键查看待办清单");
             }
-            if (s_hint_label) lv_label_set_text(s_hint_label, "OK: New Rec   DN: View Todos");
+            if (s_hint_label) lv_label_set_text(s_hint_label, "OK: 重新录音   向下键: 待办");
         }
     } else if (s_cur_view == VIEW_PAIRING_LINK) {
-        // Mode 2: Pairing & Connection Link
+        // 看板 2: 配对连接与网络服务器看板
         if (s_status_badge) {
-            lv_label_set_text(s_status_badge, "🔗 PAIRING LINK & WEB");
+            lv_label_set_text(s_status_badge, "🔗 配对连接已就绪");
             lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x2563EB), 0);
         }
-        if (s_timer_label) lv_label_set_text(s_timer_label, "PIN: 8826");
+        if (s_timer_label) lv_label_set_text(s_timer_label, "配对码: 8826");
         if (s_content_label) {
             lv_label_set_text_fmt(s_content_label,
-                "Web: http://127.0.0.1:8000\n"
-                "TCP: 5566 (NDJSON Stream)\n"
-                "MAC: %s\n"
-                "Status: CONNECTED / READY", s_mac_str);
+                "控制台: http://127.0.0.1:8000\n"
+                "端口: TCP 5566 (硬件流)\n"
+                "设备: %s\n"
+                "状态: 在线 / 已连接", s_mac_str);
         }
-        if (s_hint_label) lv_label_set_text(s_hint_label, "Open Web Browser to Pair");
+        if (s_hint_label) lv_label_set_text(s_hint_label, "请在电脑浏览器打开控制台配对");
     } else if (s_cur_view == VIEW_TODOS) {
-        // Mode 3: Action Todos
+        // 看板 3: 待办事项落实
         if (s_status_badge) {
-            lv_label_set_text(s_status_badge, "📋 ACTION TODOS");
+            lv_label_set_text(s_status_badge, "📋 核心行动项待办");
             lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x7C3AED), 0);
         }
-        if (s_timer_label) lv_label_set_text(s_timer_label, "Feishu Task Sync");
+        if (s_timer_label) lv_label_set_text(s_timer_label, "飞书任务同步");
         if (s_content_label) {
             int idx = s_todo_page % TODO_COUNT;
             lv_label_set_text_fmt(s_content_label,
-                "Item %d of %d:\n%s", idx + 1, TODO_COUNT, s_sample_todos[idx]);
+                "待办 %d/%d:\n%s", idx + 1, TODO_COUNT, s_sample_todos[idx]);
         }
-        if (s_hint_label) lv_label_set_text(s_hint_label, "UP/DN: Next Item   OK: Done");
+        if (s_hint_label) lv_label_set_text(s_hint_label, "上下键: 切换待办   OK: 确认");
     }
 
     bsp_lvgl_unlock();
@@ -199,7 +197,7 @@ static void meeting_record_task(void *arg) {
     (void)arg;
     int16_t *chunk = malloc(CHUNK_SAMPLES * sizeof(int16_t));
     if (!chunk) {
-        ESP_LOGE(TAG, "Audio buffer alloc failed");
+        ESP_LOGE(TAG, "音频内存分配失败");
         vTaskDelete(NULL);
         return;
     }
@@ -222,47 +220,52 @@ static void meeting_record_task(void *arg) {
 void demo_meeting_enter(void) {
     s_scr = ui_pixel_screen_create("FEISHU");
 
-    // Retrieve real MAC address
+    // 读取芯片硬件 STA MAC 地址
     uint8_t mac[6] = {0};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
         snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 
-    // Top Battery bar
+    // 顶部电量显示 (使用原生中文 14px 字体)
     s_bat_label = lv_label_create(s_scr);
-    lv_obj_set_style_text_font(s_bat_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_bat_label, &font_chinese_14, 0);
     lv_obj_align(s_bat_label, LV_ALIGN_TOP_LEFT, 16, 26);
     update_battery();
 
-    // Main Card Panel
+    // 主内容面板卡片
     lv_obj_t *panel = ui_pixel_panel_create(s_scr, 16, 48, 208, 192, UI_PAPER);
 
+    // 顶部当前看板标签
     s_tab_label = lv_label_create(panel);
-    lv_obj_set_style_text_font(s_tab_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_tab_label, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_tab_label, lv_color_hex(0x64748B), 0);
     lv_obj_align(s_tab_label, LV_ALIGN_TOP_MID, 0, 4);
 
+    // 状态徽章
     s_status_badge = lv_label_create(panel);
-    lv_obj_set_style_text_font(s_status_badge, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_status_badge, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x059669), 0);
-    lv_obj_align(s_status_badge, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_align(s_status_badge, LV_ALIGN_TOP_MID, 0, 24);
 
+    // 计时器 / 配对码大字体标签 (使用 Montserrat 20 英文/数字)
     s_timer_label = lv_label_create(panel);
     lv_obj_set_style_text_font(s_timer_label, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(s_timer_label, lv_color_hex(UI_INK), 0);
-    lv_obj_align(s_timer_label, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_align(s_timer_label, LV_ALIGN_TOP_MID, 0, 46);
 
+    // 核心内容说明 (使用原生中文 14px 字体，自动换行)
     s_content_label = lv_label_create(panel);
-    lv_obj_set_style_text_font(s_content_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_content_label, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_content_label, lv_color_hex(UI_INK), 0);
     lv_obj_set_style_text_align(s_content_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_content_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s_content_label, 192);
+    lv_obj_set_width(s_content_label, 196);
     lv_obj_align(s_content_label, LV_ALIGN_CENTER, 0, 24);
 
+    // 底部按键提示 (使用原生中文 14px 字体)
     s_hint_label = lv_label_create(panel);
-    lv_obj_set_style_text_font(s_hint_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_hint_label, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_hint_label, lv_color_hex(0x64748B), 0);
     lv_obj_align(s_hint_label, LV_ALIGN_BOTTOM_MID, 0, -4);
 
@@ -317,7 +320,6 @@ void demo_meeting_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
                 update_ui();
             }
         } else if (s_cur_view == VIEW_PAIRING_LINK) {
-            // Switch back to recorder
             s_cur_view = VIEW_RECORDER;
             update_ui();
         } else if (s_cur_view == VIEW_TODOS) {
