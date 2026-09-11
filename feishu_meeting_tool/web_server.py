@@ -584,6 +584,24 @@ async def set_card_mode(body: dict):
     return {"code": 0, "msg": f"卡片已切换至模式: {mode_id}", "data": get_card_bridge().get_screen_state()}
 
 
+@app.get("/api/firmware/download")
+async def download_firmware_bin():
+    from fastapi.responses import FileResponse
+    bin_path = Path(r"c:\Users\p\Desktop\ai 卡片\firmware\FoloToy-AI-Passport-full.bin")
+    if bin_path.exists():
+        return FileResponse(path=str(bin_path), filename="FoloToy-AI-Passport-full.bin", media_type="application/octet-stream")
+    return {"code": -1, "msg": "固件文件未找到"}
+
+
+@app.get("/api/firmware/download_zip")
+async def download_firmware_zip():
+    from fastapi.responses import FileResponse
+    zip_path = Path(r"c:\Users\p\Desktop\ai 卡片\firmware\AI-Passport-Firmware-Package.zip")
+    if zip_path.exists():
+        return FileResponse(path=str(zip_path), filename="AI-Passport-Firmware-Package.zip", media_type="application/zip")
+    return {"code": -1, "msg": "固件压缩包未找到"}
+
+
 @app.get("/api/nfc/cards")
 async def get_nfc_cards():
     cb = get_card_bridge()
