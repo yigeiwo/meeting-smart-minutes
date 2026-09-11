@@ -102,7 +102,7 @@ static void update_ui(void) {
         // 看板 1: 会议录音与纪要提炼
         if (s_state == MEETING_IDLE) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "● 待命中 [就绪]");
+                lv_label_set_text(s_status_badge, "[待命] 系统就绪");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x059669), 0);
             }
             if (s_timer_label) lv_label_set_text(s_timer_label, "00:00:00");
@@ -115,7 +115,7 @@ static void update_ui(void) {
             if (s_hint_label) lv_label_set_text(s_hint_label, "OK: 开始录音   上下键: 翻页");
         } else if (s_state == MEETING_RECORDING) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "● 录音中 [正在转写]");
+                lv_label_set_text(s_status_badge, "[录音] 正在采集音频");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0xDC2626), 0);
             }
             if (s_timer_label) {
@@ -132,9 +132,10 @@ static void update_ui(void) {
             if (s_hint_label) lv_label_set_text(s_hint_label, "OK: 结束录音并生成纪要");
         } else if (s_state == MEETING_PROCESSING) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "⚡ AI 智能提炼处理中...");
+                lv_label_set_text(s_status_badge, "[提炼] AI 智能处理中");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0xD97706), 0);
             }
+            if (s_timer_label) lv_label_set_text(s_timer_label, "AI SYNC");
             if (s_content_label) {
                 lv_label_set_text(s_content_label,
                     "AI 正在提炼核心决议...\n"
@@ -144,9 +145,10 @@ static void update_ui(void) {
             if (s_hint_label) lv_label_set_text(s_hint_label, "请稍候...");
         } else if (s_state == MEETING_COMPLETED) {
             if (s_status_badge) {
-                lv_label_set_text(s_status_badge, "✔ 会议纪要已生成并同步");
+                lv_label_set_text(s_status_badge, "[完成] 纪要已同步");
                 lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x2563EB), 0);
             }
+            if (s_timer_label) lv_label_set_text(s_timer_label, "DONE");
             if (s_content_label) {
                 lv_label_set_text(s_content_label,
                     "会议纪要已自动生成！\n"
@@ -158,10 +160,10 @@ static void update_ui(void) {
     } else if (s_cur_view == VIEW_PAIRING_LINK) {
         // 看板 2: 配对连接与网络服务器看板
         if (s_status_badge) {
-            lv_label_set_text(s_status_badge, "🔗 配对连接已就绪");
+            lv_label_set_text(s_status_badge, "[连接] 配对网络已就绪");
             lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x2563EB), 0);
         }
-        if (s_timer_label) lv_label_set_text(s_timer_label, "配对码: 8826");
+        if (s_timer_label) lv_label_set_text(s_timer_label, "PIN: 8826");
         if (s_content_label) {
             lv_label_set_text_fmt(s_content_label,
                 "控制台: http://127.0.0.1:8000\n"
@@ -173,10 +175,10 @@ static void update_ui(void) {
     } else if (s_cur_view == VIEW_TODOS) {
         // 看板 3: 待办事项落实
         if (s_status_badge) {
-            lv_label_set_text(s_status_badge, "📋 核心行动项待办");
+            lv_label_set_text(s_status_badge, "[待办] 核心行动项清单");
             lv_obj_set_style_text_color(s_status_badge, lv_color_hex(0x7C3AED), 0);
         }
-        if (s_timer_label) lv_label_set_text(s_timer_label, "飞书任务同步");
+        if (s_timer_label) lv_label_set_text(s_timer_label, "FEISHU TASK");
         if (s_content_label) {
             int idx = s_todo_page % TODO_COUNT;
             lv_label_set_text_fmt(s_content_label,
