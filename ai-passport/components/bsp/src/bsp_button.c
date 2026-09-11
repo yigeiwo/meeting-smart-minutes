@@ -65,8 +65,8 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
             .max          = BTN_MV[i][1],
         };
         const button_config_t bc = {
-            .long_press_time = 1500,
-            .short_press_time = 250,
+            .long_press_time = 700,
+            .short_press_time = 180,
         };
         esp_err_t e = iot_button_new_adc_device(&bc, &ac, &s_btn[i]);
         if (e != ESP_OK || !s_btn[i]) {
@@ -79,6 +79,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         iot_button_register_cb(s_btn[i], BUTTON_SINGLE_CLICK,    NULL, cb_click,  idx);
         iot_button_register_cb(s_btn[i], BUTTON_DOUBLE_CLICK,    NULL, cb_double, idx);
         iot_button_register_cb(s_btn[i], BUTTON_LONG_PRESS_START,NULL, cb_long,   idx);
+        iot_button_register_cb(s_btn[i], BUTTON_LONG_PRESS_UP,   NULL, cb_long,   idx);
     }
 
     // 通道已由组件配置好,这里只补一份校准句柄给 bsp_button_read_mv() 用。

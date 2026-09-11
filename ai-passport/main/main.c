@@ -93,8 +93,9 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
 
     if (s_active >= 0) {
         if ((btn == BSP_BTN_OK && ev == BSP_BTN_LONG) ||
-            (btn == BSP_BTN_UP && ev == BSP_BTN_LONG)) {     // 长按确定键或长按上键(1.5秒)返回主功能菜单
-            ESP_LOGI(TAG, "Triggered return to function selection menu");
+            (btn == BSP_BTN_UP && ev == BSP_BTN_LONG) ||
+            (btn == BSP_BTN_OK && ev == BSP_BTN_DOUBLE)) {     // 长按确定键(700ms)、长按上键或双击确定键均可秒回菜单
+            ESP_LOGI(TAG, "按键触发返回主功能菜单: btn=%d, ev=%d", btn, ev);
             DEMOS[s_active].exit();
             enter_menu();
         } else {
