@@ -66,7 +66,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         };
         const button_config_t bc = {
             .long_press_time = 1500,
-            .short_press_time = 180,
+            .short_press_time = 250,
         };
         esp_err_t e = iot_button_new_adc_device(&bc, &ac, &s_btn[i]);
         if (e != ESP_OK || !s_btn[i]) {

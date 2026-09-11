@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
+extern const lv_font_t font_chinese_14;
+
 static const char *TAG = "demo_wifi";
 
 #define WIFI_RESULT_COUNT 5
@@ -124,9 +126,9 @@ static void show_scan_results(void)
         if (written < 0 || (size_t)written >= sizeof(text) - used) break;
         used += (size_t)written;
     }
-    if (count == 0) snprintf(text, sizeof(text), "No access points found");
+    if (count == 0) snprintf(text, sizeof(text), "未发现周围无线热点");
 
-    lv_label_set_text_fmt(s_status, "%u APs  |  OK: RESCAN", total);
+    lv_label_set_text_fmt(s_status, "发现 %u 个热点 (按OK重扫)", total);
     lv_label_set_text(s_results, text);
     s_state = WIFI_DEMO_OFF;
 }
@@ -136,16 +138,16 @@ static void tick(lv_timer_t *timer)
     (void)timer;
     switch (s_state) {
     case WIFI_DEMO_STARTING:
-        lv_label_set_text(s_status, "Starting Wi-Fi...");
+        lv_label_set_text(s_status, "正在启动无线网卡...");
         break;
     case WIFI_DEMO_SCANNING:
-        lv_label_set_text(s_status, "Scanning 2.4 GHz...");
+        lv_label_set_text(s_status, "正在扫描 2.4GHz 热点...");
         break;
     case WIFI_DEMO_READY:
         show_scan_results();
         break;
     case WIFI_DEMO_FAILED:
-        lv_label_set_text_fmt(s_status, "Wi-Fi failed: %s", esp_err_to_name(s_error));
+        lv_label_set_text_fmt(s_status, "无线启动失败: %s", esp_err_to_name(s_error));
         s_state = WIFI_DEMO_OFF;
         break;
     default:
@@ -182,16 +184,26 @@ void demo_wifi_enter(void) {
 
     s_status = lv_label_create(panel);
     lv_obj_set_width(s_status, 190);
+    lv_obj_set_style_text_font(s_status, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_status, lv_color_hex(UI_SKY_DARK), 0);
     lv_obj_align(s_status, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_label_set_text(s_status, "Starting Wi-Fi...");
+    lv_label_set_text(s_status, "正在启动无线网卡...");
 
     s_results = lv_label_create(panel);
     lv_obj_set_width(s_results, 190);
     lv_obj_set_style_text_font(s_results, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_results, lv_color_hex(UI_INK), 0);
-    lv_obj_align(s_results, LV_ALIGN_TOP_LEFT, 2, 35);
-    lv_label_set_text(s_results, "RSSI  SSID  CHANNEL");
+    lv_obj_align(s_results, LV_ALIGN_TOP_LEFT, 2, 26);
+    lv_label_set_text(s_results, "信号   热点名称           信道");
+
+    lv_obj_t *hint = lv_label_create(panel);
+    lv_obj_set_style_text_font(hint, &font_chinese_14, 0);
+    lv_obj_set_style_text_color(hint, lv_color_hex(0x94A3B8), 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(hint, 190);
+    lv_label_set_text(hint, "无触屏 | 手机NFC碰一下/蓝牙配网");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);
 
     ui_pixel_mascot_create(s_scr, 101, 246);
     s_timer = lv_timer_create(tick, 100, NULL);

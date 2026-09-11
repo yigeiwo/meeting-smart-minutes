@@ -302,7 +302,7 @@ void demo_meeting_enter(void) {
     s_p1_hint = lv_label_create(s_page[0]);
     lv_obj_set_style_text_font(s_p1_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p1_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(s_p1_hint, "OK: 开始录音   上下键: 翻页");
+    lv_label_set_text(s_p1_hint, "OK: 录音   下键: 切换看板");
     lv_obj_align(s_p1_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
@@ -358,7 +358,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *p2_hint = lv_label_create(s_page[1]);
     lv_obj_set_style_text_font(p2_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p2_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p2_hint, "请在电脑浏览器打开控制台");
+    lv_label_set_text(p2_hint, "下键: 切换看板   长按OK: 菜单");
     lv_obj_align(p2_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     // ========================================================================
@@ -402,7 +402,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *p3_hint = lv_label_create(s_page[2]);
     lv_obj_set_style_text_font(p3_hint, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p3_hint, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(p3_hint, "长按 OK 键: 返回功能菜单");
+    lv_label_set_text(p3_hint, "下键: 切换看板   长按OK: 菜单");
     lv_obj_align(p3_hint, LV_ALIGN_TOP_MID, 0, 164);
 
     s_mascot = ui_pixel_mascot_create(s_scr, 101, 248);
@@ -475,11 +475,15 @@ void demo_meeting_key(bsp_btn_t btn, bsp_btn_ev_t ev) {
             update_ui();
         }
     } else if (btn == BSP_BTN_DOWN) {
-        // 下键: 平滑切换下一页 (0 -> 1 -> 2 -> 0)
-        show_page((s_cur_page + 1) % 3);
+        // 下键: 单向顺序平滑切换下一看板 (0 -> 1 -> 2 -> 0)，增加 450ms 冷却防止连击
+        static uint32_t s_last_page_tick = 0;
+        if (now_tick - s_last_page_tick >= 450) {
+            s_last_page_tick = now_tick;
+            show_page((s_cur_page + 1) % 3);
+        }
     } else if (btn == BSP_BTN_UP) {
-        // 上键: 平滑切换上一页 (0 -> 2 -> 1 -> 0)
-        if (s_cur_page > 0) show_page(s_cur_page - 1);
-        else show_page(2);
+        // 上键: 刷新当前看板状态与吉祥物互动，不执行切页（彻底消除 GPIO0 地线瞬态毛刺导致的屏幕反复跳动闪烁）
+        ui_pixel_mascot_jump(s_mascot);
+        update_ui();
     }
 }
