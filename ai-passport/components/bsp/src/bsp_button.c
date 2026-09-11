@@ -7,6 +7,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 
 static const char *TAG = "bsp_btn";
@@ -40,6 +41,9 @@ static void cb_long  (void *a, void *u) { on_event(a, u, BSP_BTN_LONG);   }
 
 esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
     s_cb = cb; s_user = user;
+
+    // 启用 GPIO0 弱上拉与禁用下拉，防止引脚在外部上拉偏弱或悬空时跌入 0V 导致误触
+    gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
 
     // 先由 BSP 建 unit,再把句柄交给 button 组件(button_adc.h:adc_handle 非 NULL 即复用),
     // 这样本文件的 bsp_button_read_mv() 也能读同一路 ADC。
