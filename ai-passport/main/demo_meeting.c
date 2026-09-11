@@ -63,15 +63,16 @@ static const char *s_sample_todos[] = {
 static void update_battery(void) {
     if (!s_bat_label) return;
     int soc = bsp_battery_soc();
-    int mv  = bsp_battery_mv();
 
     if (soc < 0) {
-        lv_label_set_text(s_bat_label, "电量: USB供电中");
+        lv_label_set_text(s_bat_label, "100%");
         lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0x0284C7), 0);
     } else {
-        lv_label_set_text_fmt(s_bat_label, "电量: %d%% (%dmV)", soc, mv > 0 ? mv : 4150);
+        lv_label_set_text_fmt(s_bat_label, "%d%%", soc);
         if (soc < 20) {
             lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0xDC2626), 0);
+        } else if (soc <= 50) {
+            lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0xD97706), 0);
         } else {
             lv_obj_set_style_text_color(s_bat_label, lv_color_hex(0x16A34A), 0);
         }
@@ -229,14 +230,15 @@ void demo_meeting_enter(void) {
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 
-    // 顶部电量显示 (使用原生中文 14px 字体)
-    s_bat_label = lv_label_create(s_scr);
-    lv_obj_set_style_text_font(s_bat_label, &font_chinese_14, 0);
-    lv_obj_align(s_bat_label, LV_ALIGN_TOP_LEFT, 16, 26);
+    // 右上角电量指示胶囊 (仅显示百分比数值，与左侧 FEISHU 标题框对称)
+    lv_obj_t *bat_pill = ui_pixel_panel_create(s_scr, 164, 8, 68, 33, UI_PAPER);
+    s_bat_label = lv_label_create(bat_pill);
+    lv_obj_set_style_text_font(s_bat_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(s_bat_label);
     update_battery();
 
-    // 主内容面板卡片
-    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 16, 48, 208, 192, UI_PAPER);
+    // 主内容面板卡片 (居中对称分布: x=14, y=48, w=212, h=196)
+    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 14, 48, 212, 196, UI_PAPER);
 
     // 顶部当前看板标签
     s_tab_label = lv_label_create(panel);
@@ -256,14 +258,14 @@ void demo_meeting_enter(void) {
     lv_obj_set_style_text_color(s_timer_label, lv_color_hex(UI_INK), 0);
     lv_obj_align(s_timer_label, LV_ALIGN_TOP_MID, 0, 46);
 
-    // 核心内容说明 (使用原生中文 14px 字体，自动换行)
+    // 核心内容说明 (使用原生中文 14px 字体，自上而下舒展排布)
     s_content_label = lv_label_create(panel);
     lv_obj_set_style_text_font(s_content_label, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_content_label, lv_color_hex(UI_INK), 0);
     lv_obj_set_style_text_align(s_content_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_content_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_content_label, 196);
-    lv_obj_align(s_content_label, LV_ALIGN_CENTER, 0, 24);
+    lv_obj_align(s_content_label, LV_ALIGN_TOP_MID, 0, 80);
 
     // 底部按键提示 (使用原生中文 14px 字体)
     s_hint_label = lv_label_create(panel);
@@ -271,7 +273,7 @@ void demo_meeting_enter(void) {
     lv_obj_set_style_text_color(s_hint_label, lv_color_hex(0x64748B), 0);
     lv_obj_align(s_hint_label, LV_ALIGN_BOTTOM_MID, 0, -4);
 
-    s_mascot = ui_pixel_mascot_create(s_scr, 101, 246);
+    s_mascot = ui_pixel_mascot_create(s_scr, 101, 248);
 
     s_state = MEETING_IDLE;
     s_cur_view = VIEW_RECORDER;
