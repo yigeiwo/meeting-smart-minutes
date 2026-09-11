@@ -36,7 +36,32 @@ jobs:
           command: |
             cd ai-passport
             chmod +x tools/validate.sh
-            ./tools/validate.sh --firmware
+            set +e
+            ./tools/validate.sh --firmware > /tmp/idf.log 2>&1
+            rc=$?
+            tail -n 150 /tmp/idf.log
+            cp -f /tmp/idf.log ./idf_build.log 2>/dev/null
+            cp -f /tmp/idf.log /github/workspace/idf_build.log 2>/dev/null
+            exit $rc
+
+      - name: Ensure build log available
+        if: always()
+        run: |
+          if [ ! -f idf_build.log ]; then
+            cp ai-passport/idf_build.log idf_build.log 2>/dev/null || echo "CI 未捕获到编译日志" > idf_build.log
+          fi
+          echo "日志大小: $(wc -c < idf_build.log) 字节"
+
+      # 失败时把编译日志发布成公开可下载的 Release 资源, 便于无人值守时定位问题。
+      # 排查完可以删掉这一步(以及上一步)。
+      - name: Publish build log as Release asset (on failure)
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-log
+          name: "Build Log (latest failure)"
+          prerelease: true
+          files: idf_build.log
 
       - name: Copy firmware to root release folder
         run: |

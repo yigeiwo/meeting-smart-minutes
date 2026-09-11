@@ -487,7 +487,9 @@ static esp_err_t ws_setup(const char *uri)
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t err = esp_websocket_client_register_events(s_ws, WEBSOCKET_EVENT_ANY, ws_event_cb, NULL);
+    // 注意: 该 API 名为 esp_websocket_register_events (没有 _client_ 中缀),
+    // 写成 esp_websocket_client_register_events 会在编译期报未声明。
+    esp_err_t err = esp_websocket_register_events(s_ws, WEBSOCKET_EVENT_ANY, ws_event_cb, NULL);
     if (err != ESP_OK) {
         set_error("注册 WebSocket 事件失败: %d", err);
         ws_teardown();
