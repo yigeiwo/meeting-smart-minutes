@@ -6,6 +6,16 @@
 
 ## Unreleased
 
+- Fixed the UP key triggering by itself and the screen jumping back to the menu:
+  the idle button level sits at the `ADC_ATTEN_DB_12` range limit, where the ADC
+  was measured to return occasional raw=0 readings (never two consecutive samples
+  at 10 ms) that fall inside the UP window and are read as repeated presses. An
+  independent 10 ms sampler in `bsp_button.c` now gates events through the
+  "three consecutive samples in the same window" rule in `bsp_button_filter.h`,
+  covered offline by `tests/test_button_filter.c`. The UP window lower bound is
+  restored to 0 (`{0,140}`), and the hardware guide records the operating point,
+  the glitch shape, and why the digital level cannot be used as a cross-check.
+
 - Made mini-program BLE install compatibility a template-level invariant: fixed
   protected `cardid`/Recovery partitions, retained the five-second UP-key
   Recovery boot hook, and added CI validation for merged-image structure,

@@ -1,6 +1,7 @@
 // components/bsp/src/bsp_button.c
 // 移植自 trae_card/components/platform/platform_esp32/src/btn_iot_button.c
 #include "bsp_button.h"
+#include "bsp_button_filter.h"
 #include "bsp_pins.h"
 #include "iot_button.h"
 #include "button_adc.h"
@@ -19,10 +20,15 @@ static button_handle_t s_btn[BSP_BTN_COUNT];
 static bsp_btn_cb_t    s_cb;
 static void           *s_user;
 
-// ADC1 是 unit 级独占资源:iot_button 与 bsp_button_read_mv() 必须共用同一个 oneshot
-// 句柄。谁第二个调 adc_oneshot_new_unit() 谁就拿到 "adc1 is already in use"。
+// ADC1 是 unit 级独占资源:iot_button 与电压显示必须共用同一个 oneshot 句柄。
+// 谁第二个调 adc_oneshot_new_unit() 谁就拿到 "adc1 is already in use"。
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t         s_cali;
+
+// 按键滤波状态:由下面的独立采样器更新, 事件出口据此门控。
+// 采样器同时缓存最近一次电压用给 Button 页, 页面不再自己开一路 ADC 读者。
+static bsp_btn_filter_t  s_filt[BSP_BTN_COUNT];
+static volatile int      s_last_mv = -1;
 
 // 电压读取的衰减档必须与 button 组件内部的 ADC_BUTTON_ATTEN 一致 —— 通道只被配置一次
 // (由组件在 iot_button_new_adc_device() 里下发),两边对不上会让读数与按键阈值错位。
@@ -30,10 +36,31 @@ static adc_cali_handle_t         s_cali;
 #define BSP_BTN_ATTEN  ADC_ATTEN_DB_12       // 量程约 0~3100mV,覆盖松开态
 
 // 每个按键把"哪个键"随回调带回来。button 组件的回调签名固定,故用 usr_data 传索引。
+//
+// 出口门控: 按键组件不判断 ADC 采样的连续性, 单格坏读数会被它当成一次按下。
+// 本板空闲电平在 12dB 量程上限(实测 raw 恒为 4095), 该工作点会偶发 raw=0 的坏读数,
+// 折算成 0mV 恰好落进上键窗口(0~140mV) —— 结果就是上键自发乱按、页面自己跳回主菜单,
+// 而下键/确定键(180~430 / 460~1200mV)离 0 很远, 完全不受影响。
+// 这里用独立采样器的"连续 3 格同窗口"结论做闸门: 没有真实按下就不放行。
+// 真人按键 ≥100ms(≥10 格), 与 3 格门限有 3 倍以上裕量。完整推导见 bsp_button_filter.h。
 static void on_event(void *arg, void *usr_data, bsp_btn_ev_t ev) {
     (void)arg;
     if (!s_cb) return;
-    s_cb((bsp_btn_t)(intptr_t)usr_data, ev, s_user);
+
+    const int i = (int)(intptr_t)usr_data;
+    if (i >= 0 && i < BSP_BTN_COUNT) {
+        const int64_t now = esp_timer_get_time();
+        if (!bsp_btn_filter_accepts_event(&s_filt[i], now, BSP_BTN_EVENT_TOL_US)) {
+            // 每秒最多提示一次, 避免坏读数频繁时刷屏
+            static int64_t s_last_warn_us;
+            if (now - s_last_warn_us > 1000000) {
+                s_last_warn_us = now;
+                ESP_LOGW(TAG, "丢弃按键 %d 的坏读数事件 (ev=%d): 未经连续采样确认", i, ev);
+            }
+            return;
+        }
+    }
+    s_cb((bsp_btn_t)i, ev, s_user);
 }
 static void cb_press (void *a, void *u) { on_event(a, u, BSP_BTN_PRESS);  }
 static void cb_click (void *a, void *u) { on_event(a, u, BSP_BTN_CLICK);  }
@@ -41,91 +68,74 @@ static void cb_double(void *a, void *u) { on_event(a, u, BSP_BTN_DOUBLE); }
 static void cb_long  (void *a, void *u) { on_event(a, u, BSP_BTN_LONG);   }
 
 // ---------------------------------------------------------------------------
-// 分压诊断
+// 独立采样器: 10ms 一格, 既是滤波器的事实来源, 也是 Button 页的电压来源
 //
-// 实测结论(已用 gpio_get_level 交叉验证过):
-//   引脚一旦配置成 ADC 输入, 数字输入通路就被关闭 —— gpio_get_level(GPIO0) 恒为 0,
-//   而此时 ADC 稳定读到 raw=4095(满量程, 约 3024mV)。所以数字电平【不能】当判据,
-//   判断"按键是不是被真实按下"只能看 ADC 的 raw。
-//
-// 本诊断以 10ms 为一格, 记录 raw 落在各电压窗口的情况, 每 2 秒打印一行分类波形:
-//   U=上键窗口(0~140mV)  D=下键窗口(180~430)  O=确定窗口(460~1200)
-//   -=窗口之间的空隙      .=松开(>1200)        !=读失败
-// 并统计【最长连续 U 格数】: 真人按键会连续压住几十格, 偶发坏读数通常只占 1 格,
-// 这个数字决定了滤波窗口该取多长。
-// 不需要时把 BSP_BTN_DIAG 改成 0, 定时器与代码一起被裁掉, 零开销。
+// 为什么必须有这一层(实机实测结论):
+//   · 空闲时引脚被外部 10k 上拉到 3.3V, 已到 ADC 12dB 量程上限, 实测 raw 恒为 4095。
+//   · 该工作点上 ADC 会偶发返回 raw=0 的坏读数; 10ms 采样实测【从不连续出现 2 格】。
+//   · 引脚一旦配置成 ADC 输入, 数字输入通路即被关闭 —— 此时 gpio_get_level(GPIO0) 恒为 0,
+//     与 ADC 读到的 4095 相互矛盾, 所以【不能】用数字电平当交叉判据(已实测排除)。
+//   · 因此判定"真实按下"只能靠 ADC 的连续性: 连续 3 格同窗口(30ms)才算按下。
 // ---------------------------------------------------------------------------
-#define BSP_BTN_DIAG  1
+#define BSP_BTN_SAMPLE_PERIOD_US  (10 * 1000)
+
+// 诊断波形: 每 2 秒打印一行 10ms/格的分类波形(U/D/O=三键窗口, -=窗口间空隙, .=松开)。
+// 排查"某个键自发乱跳"时改成 1 即可, 与采样共用同一次读取, 不额外增加 ADC 读者。
+#define BSP_BTN_DIAG  0
+
+static esp_timer_handle_t s_sample_timer;
+
+static void btn_sample_cb(void *arg) {
+    (void)arg;
+    if (!s_adc || !s_cali) return;
+
+    int raw = 0, mv = 0;
+    if (adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) != ESP_OK) return;
+    if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) return;
+    s_last_mv = mv;
+
+    const int64_t now = esp_timer_get_time();
+    for (int i = 0; i < BSP_BTN_COUNT; i++) {
+        bsp_btn_filter_feed(&s_filt[i], mv, now);
+    }
 
 #if BSP_BTN_DIAG
-static char s_diag_tr[201];      // 200 格 x 10ms = 2 秒
-
-static void btn_diag_cb(void *arg) {
-    (void)arg;
-    static int idx = 0, sec = 0;
-    static int u_cnt = 0, u_run = 0, u_maxrun = 0;
-    static int u_raw_min = 99999, u_raw_max = -1;
-    static int raw_min = 99999, raw_max = -1, fails = 0;
-
-    int raw = 0, mv = -1;
-    esp_err_t e = s_adc ? adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) : ESP_FAIL;
-    if (e == ESP_OK && s_cali) {
-        if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) mv = -1;
-    } else {
-        mv = -1;
+    static char tr[201];
+    static int  idx = 0, sec = 0, up_cnt = 0, up_run = 0, up_maxrun = 0;
+    char c = '.';
+    for (int i = 0; i < BSP_BTN_COUNT; i++) {
+        if (mv >= BTN_MV[i][0] && mv <= BTN_MV[i][1]) c = "UDO"[i];
     }
-
-    char c;
-    if (mv < 0) {
-        c = '!'; fails++;
-        if (u_run > u_maxrun) u_maxrun = u_run;
-        u_run = 0;
-    } else {
-        if (raw < raw_min) raw_min = raw;
-        if (raw > raw_max) raw_max = raw;
-        if (mv <= 140) {                       // 上键窗口
-            c = 'U'; u_cnt++; u_run++;
-            if (u_run > u_maxrun) u_maxrun = u_run;
-            if (raw < u_raw_min) u_raw_min = raw;
-            if (raw > u_raw_max) u_raw_max = raw;
-        } else {
-            if (u_run > u_maxrun) u_maxrun = u_run;
-            u_run = 0;
-            if (mv < 180)        c = '-';
-            else if (mv <= 430)  c = 'D';
-            else if (mv < 460)   c = '-';
-            else if (mv <= 1200) c = 'O';
-            else                 c = '.';
-        }
-    }
-    if (idx < 200) s_diag_tr[idx++] = c;
-
+    if (c == 'U') { up_cnt++; if (++up_run > up_maxrun) up_maxrun = up_run; }
+    else          { up_run = 0; }
+    tr[idx++] = c;
     if (idx >= 200) {
-        s_diag_tr[idx] = '\0';
-        ESP_LOGI(TAG, "[%02ds] %s", sec, &s_diag_tr[0]);
-        ESP_LOGI(TAG, "       %s", &s_diag_tr[100]);
-        ESP_LOGI(TAG, "       U格%d 最长连续%d格(%dms) U内raw=%d~%d | 全程raw=%d~%d 读失败%d",
-                 u_cnt, u_maxrun, u_maxrun * 10,
-                 u_raw_min > 99999 ? -1 : u_raw_min, u_raw_max,
-                 raw_min > 99999 ? -1 : raw_min, raw_max, fails);
-        idx = 0; sec += 2;
-        u_cnt = u_run = u_maxrun = 0; fails = 0;
-        u_raw_min = 99999; u_raw_max = -1;
-        raw_min = 99999; raw_max = -1;
+        tr[idx] = '\0';
+        ESP_LOGI(TAG, "[%02ds] %s", sec, &tr[0]);
+        ESP_LOGI(TAG, "       %s", &tr[100]);
+        ESP_LOGI(TAG, "       U格%d 最长连续%d格(%dms) 当前mv=%d", up_cnt, up_maxrun,
+                 up_maxrun * 10, mv);
+        idx = 0; sec += 2; up_cnt = up_maxrun = up_run = 0;
     }
-}
 #endif
+}
 
 esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
     s_cb = cb; s_user = user;
 
+    for (int i = 0; i < BSP_BTN_COUNT; i++) {
+        bsp_btn_filter_init(&s_filt[i], BTN_MV[i][0], BTN_MV[i][1], BSP_BTN_FILTER_SAMPLES);
+    }
+
     // 启用 GPIO0 弱上拉与禁用下拉，防止引脚在外部上拉偏弱或悬空时跌入 0V 导致误触
     const esp_err_t pe = gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
-    ESP_LOGI(TAG, "GPIO0 弱上拉设置: %s; 此刻数字电平=%d", esp_err_to_name(pe),
-             gpio_get_level(GPIO_NUM_0));
+    if (pe != ESP_OK) {
+        ESP_LOGE(TAG, "GPIO0 上拉配置失败 (%s)", esp_err_to_name(pe));
+        return pe;
+    }
 
     // 先由 BSP 建 unit,再把句柄交给 button 组件(button_adc.h:adc_handle 非 NULL 即复用),
-    // 这样本文件的 bsp_button_read_mv() 也能读同一路 ADC。
+    // 这样采样器与组件读的是同一路 ADC。
     const adc_oneshot_unit_init_cfg_t ucfg = { .unit_id = BSP_BTN_ADC_UNIT };
     esp_err_t ae = adc_oneshot_new_unit(&ucfg, &s_adc);
     if (ae != ESP_OK) {
@@ -161,12 +171,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         iot_button_register_cb(s_btn[i], BUTTON_LONG_PRESS_UP,   NULL, cb_long,   idx);
     }
 
-    // 交叉验证: ADC 通道被组件配置后, GPIO0 的数字输入通路是否还读得到真实电平。
-    // 若这里读到 0 而外部是 10k 上拉, 说明模拟配置关掉了数字输入, 之后的波形诊断作废。
-    ESP_LOGI(TAG, "ADC 通道配置后 GPIO0 数字电平=%d (应为 1)", gpio_get_level(GPIO_NUM_0));
-
-    // 通道已由组件配置好,这里只补一份校准句柄给 bsp_button_read_mv() 用。
-    // 失败不致命:按键照常工作,只是读不出电压(标定分压电阻时才需要)。
+    // 通道已由组件配置好,这里只补一份校准句柄给采样器用。
     const adc_cali_curve_fitting_config_t cal = {
         .unit_id  = BSP_BTN_ADC_UNIT,
         .chan     = BSP_BTN_ADC_CHANNEL,
@@ -174,32 +179,31 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     if (adc_cali_create_scheme_curve_fitting(&cal, &s_cali) != ESP_OK) {
-        ESP_LOGW(TAG, "ADC 校准创建失败,Button 页将无法显示电压");
-        s_cali = NULL;
+        // 采样器没有电压就无法判键, 必须硬失败: 否则所有按键都会被门控挡掉,
+        // 表现为"整块板子按键全失灵", 比直接报错更难排查。
+        ESP_LOGE(TAG, "ADC 校准创建失败, 按键无法判键");
+        return ESP_FAIL;
     }
 
-#if BSP_BTN_DIAG
-    // 必须等校准句柄建好后再启动采样,否则 ADC 快照一直取不到值
-    const esp_timer_create_args_t vt = { .callback = btn_diag_cb, .name = "btn_diag" };
-    esp_timer_handle_t vth = NULL;
-    if (esp_timer_create(&vt, &vth) == ESP_OK) {
-        esp_timer_start_periodic(vth, 10 * 1000);   // 10ms 一格, 2 秒打印一行波形
-    } else {
-        ESP_LOGW(TAG, "诊断定时器创建失败, 波形不可用");
+    const esp_timer_create_args_t sc = { .callback = btn_sample_cb, .name = "btn_sample" };
+    esp_err_t te = esp_timer_create(&sc, &s_sample_timer);
+    if (te == ESP_OK) {
+        te = esp_timer_start_periodic(s_sample_timer, BSP_BTN_SAMPLE_PERIOD_US);
     }
-#endif
+    if (te != ESP_OK) {
+        ESP_LOGE(TAG, "按键采样定时器启动失败 (%s), 按键事件将被全部门控挡掉",
+                 esp_err_to_name(te));
+        return te;
+    }
 
-    ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压", BSP_BTN_ADC_CHANNEL);
+    ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压, %dms 采样 + 连续%d格滤波",
+             BSP_BTN_ADC_CHANNEL, BSP_BTN_SAMPLE_PERIOD_US / 1000, BSP_BTN_FILTER_SAMPLES);
     return ESP_OK;
 }
 
 int bsp_button_read_mv(void) {
-    // 读的是 bsp_button_init() 建好、并与 iot_button 共用的那一路 ADC。
-    // 单次采样与组件的按键轮询互不干扰(oneshot 内部自带锁)。
+    // 直接返回采样器缓存的值: 既保证与判键用的是同一份数据, 也避免再开一路 ADC 读者
+    // (额外读者会与按键组件抢同一次转换, 正是坏读数变多的来源之一)。
     if (!s_adc || !s_cali) return -1;
-
-    int raw = 0, mv = 0;
-    if (adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) != ESP_OK) return -1;
-    if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) return -1;
-    return mv;
+    return s_last_mv;
 }

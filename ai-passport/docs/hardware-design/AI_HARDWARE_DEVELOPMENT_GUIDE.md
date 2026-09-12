@@ -126,7 +126,23 @@ GPIO0 has an external 10 kΩ pull-up to 3.3 V. UP, DOWN, and OK connect it to gr
 
 The windows above are **closed intervals**: the button component tests `vol <= max && vol >= min`. UP is a 0 Ω path to ground and reads about 0 mV, so the UP lower bound must stay 0. Raising it to 20 or 40 to dodge noise has twice produced the regression where UP stops responding entirely while DOWN and OK keep working; do not reintroduce that dead zone.
 
-Do not replace the external resistor with the inaccurate internal pull-up. The BSP creates one ADC1 oneshot unit and shares it with all button devices and voltage reads. Attenuation is `ADC_ATTEN_DB_12`. Callbacks originate in the button component task and must not block or perform heavy UI work.
+A second, measured hazard appears once the lower bound is 0 (this is the most important hardware fact on this page):
+
+| Measured item | Result |
+| --- | ---: |
+| Idle (no key) raw ADC value | raw is **always 4095**, the full-scale code; the 10 kΩ pull-up to 3.3 V sits at the `ADC_ATTEN_DB_12` range limit |
+| Occasional bad reading | raw **= 0** (0 mV), **never two consecutive samples** at a 10 ms rate, roughly 1–3 per second |
+| Where it lands | exactly inside the UP window, so **only UP is affected**: it is read as repeated presses, DOUBLE events keep firing “back to menu”, and the screen **jumps to the menu by itself and is unusable** |
+| `gpio_get_level(GPIO0)` | once the pin is configured as an ADC input the **digital input path is disabled**, so it reads a constant 0 while the ADC reads 4095 — digital level **cannot** be used as a cross-check |
+
+The fix is not to retune the windows (they describe voltage only; changing them either disables UP or lets the bad reading through) but to add a **continuity gate** in the BSP:
+
+- `bsp_button.c` runs an independent 10 ms sampler that maintains per-key filter state and caches the voltage for the Button page, so no second ADC reader is created.
+- `bsp_button_filter.h` requires **three consecutive samples (30 ms) inside the same window** to accept a real press. A human press is ≥100 ms (≥10 samples), a 3× margin, while a single bad sample can never fill three slots.
+- Events reported by the button component are forwarded only if a confirmed press happened within 800 ms; anything else is dropped with a rate-limited warning.
+- The logic is pure and covered by `tests/test_button_filter.c` using the recorded glitch shape; `tools/validate.sh --static` runs it.
+
+Do not replace the external resistor with the inaccurate internal pull-up. The BSP creates one ADC1 oneshot unit and shares it with all button devices, the sampler, and voltage reads. Attenuation is `ADC_ATTEN_DB_12`. If calibration or the sample timer cannot start, `bsp_button_init()` fails hard instead of silently gating every key. Callbacks originate in the button component task and must not block or perform heavy UI work.
 
 Calibrate thresholds using multiple boards, charge levels, and reasonable temperatures; leave margin between measured distributions rather than relying only on divider theory.
 
@@ -249,6 +265,8 @@ General board acceptance:
 | Rotation change has no effect | LVGL rotation overriding lower-level mirror |
 | Backlight or console failure | GPIO21 conflict with UART0 default TX |
 | Button confusion | external 10 kΩ pull-up, measured voltage, thresholds, attenuation |
+| UP presses itself / screen jumps to the menu | occasional raw=0 bad reading caused by the idle level sitting at the range limit; check the `bsp_button` sample timer is running and `BSP_BTN_FILTER_SAMPLES` was not lowered |
+| All three buttons dead | the sampler never started (calibration or timer failure makes `bsp_button_init` fail hard and log an error) so every event is gated out |
 | `adc1 is already in use` | accidental second ADC1 oneshot unit |
 | Both I2C devices disappear | accidental second I2C0 bus |
 | Only ES8311 missing | address API shift and codec power |
