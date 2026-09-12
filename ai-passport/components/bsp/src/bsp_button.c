@@ -41,28 +41,45 @@ static void cb_double(void *a, void *u) { on_event(a, u, BSP_BTN_DOUBLE); }
 static void cb_long  (void *a, void *u) { on_event(a, u, BSP_BTN_LONG);   }
 
 // ---------------------------------------------------------------------------
-// 分压标定/排查用的电压上报
+// 分压诊断
 //
-// 只在读数发生明显变化时打印一行,静止时完全不刷屏,所以常开也不影响使用。
-// 用途:换板或改分压阻值后,逐个按住三个键,从串口读出各自真实电压,再回填
-//       bsp_pins.h 的 BSP_BTN_MV_TABLE;也是"某个键没反应"时最快的定位手段 ——
-//       按下去若电压丝毫不变(仍是 ~3300mV),说明是硬件没接通,而不是阈值问题。
-// 不需要时把 BSP_BTN_VOLT_LOG 改成 0,定时器与代码一起被裁掉,零开销。
+// ⚠ 排查"某个键自发乱跳"时, 不要用周期性 adc_oneshot_read 去观测 —— 那会在按键
+//   组件之外再开一路读者, 把嫌疑和观测手段混在一起。这里改为【只读数字电平】
+//   (gpio_get_level 不经过 ADC), 20ms 一格记录 GPIO0 的原始波形, 每 2 秒打印一行;
+//   同时用 1Hz 的 ADC 采样给出 raw/mV 做参照。两类证据对照即可判定:
+//     数字波形也是一串低电平 -> 引脚被真实拉低 (硬件通路问题)
+//     数字波形恒为高, 却有按键事件 -> ADC 读数被污染 (驱动/衰减配置问题)
+// 不需要时把 BSP_BTN_DIAG 改成 0, 定时器与代码一起被裁掉, 零开销。
 // ---------------------------------------------------------------------------
-#define BSP_BTN_VOLT_LOG  1
+#define BSP_BTN_DIAG  1
 
-#if BSP_BTN_VOLT_LOG
-static void btn_volt_log_cb(void *arg) {
+#if BSP_BTN_DIAG
+// 100 格 x 20ms = 2 秒一行
+static void btn_diag_cb(void *arg) {
     (void)arg;
-    static int s_last = -1;
-    const int mv = bsp_button_read_mv();
-    if (mv < 0) return;                       // ADC/校准未就绪
-    int delta = mv - s_last;
-    if (delta < 0) delta = -delta;
-    if (s_last < 0 || delta >= 60) {          // 60mV 门限: 三档间距最小也有 100mV 以上
-        ESP_LOGI(TAG, "按键分压 = %4d mV   (上键≈0 / 下键≈300 / 确定≈595 / 松开≈3300)",
-                 mv);
-        s_last = mv;
+    static char tr[101];
+    static int  idx = 0, hi = 0, lo = 0, jumps = 0, last = -1;
+    static int  sec = 0;
+
+    const int lv = gpio_get_level(GPIO_NUM_0);
+    tr[idx++] = lv ? '1' : '0';
+    if (lv) hi++; else lo++;
+    if (last >= 0 && lv != last) jumps++;
+    last = lv;
+
+    if (idx >= 100) {
+        tr[idx] = '\0';
+        int raw = 0, mv = -1;
+        if (s_adc && s_cali) {
+            if (adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) == ESP_OK) {
+                if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) mv = -2;
+            } else {
+                mv = -3;
+            }
+        }
+        ESP_LOGI(TAG, "[%02ds] GPIO0 波形(20ms/格, 1=高 0=低): %s", sec, tr);
+        ESP_LOGI(TAG, "      高%d 低%d 跳变%d | ADC快照 raw=%d mv=%d", hi, lo, jumps, raw, mv);
+        idx = 0; hi = lo = jumps = 0; sec += 2;
     }
 }
 #endif
@@ -71,7 +88,9 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
     s_cb = cb; s_user = user;
 
     // 启用 GPIO0 弱上拉与禁用下拉，防止引脚在外部上拉偏弱或悬空时跌入 0V 导致误触
-    gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
+    const esp_err_t pe = gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
+    ESP_LOGI(TAG, "GPIO0 弱上拉设置: %s; 此刻数字电平=%d", esp_err_to_name(pe),
+             gpio_get_level(GPIO_NUM_0));
 
     // 先由 BSP 建 unit,再把句柄交给 button 组件(button_adc.h:adc_handle 非 NULL 即复用),
     // 这样本文件的 bsp_button_read_mv() 也能读同一路 ADC。
@@ -110,6 +129,10 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         iot_button_register_cb(s_btn[i], BUTTON_LONG_PRESS_UP,   NULL, cb_long,   idx);
     }
 
+    // 交叉验证: ADC 通道被组件配置后, GPIO0 的数字输入通路是否还读得到真实电平。
+    // 若这里读到 0 而外部是 10k 上拉, 说明模拟配置关掉了数字输入, 之后的波形诊断作废。
+    ESP_LOGI(TAG, "ADC 通道配置后 GPIO0 数字电平=%d (应为 1)", gpio_get_level(GPIO_NUM_0));
+
     // 通道已由组件配置好,这里只补一份校准句柄给 bsp_button_read_mv() 用。
     // 失败不致命:按键照常工作,只是读不出电压(标定分压电阻时才需要)。
     const adc_cali_curve_fitting_config_t cal = {
@@ -123,14 +146,14 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         s_cali = NULL;
     }
 
-#if BSP_BTN_VOLT_LOG
-    // 必须等校准句柄建好后再启动采样,否则 bsp_button_read_mv() 会一直返回 -1
-    const esp_timer_create_args_t vt = { .callback = btn_volt_log_cb, .name = "btn_volt" };
+#if BSP_BTN_DIAG
+    // 必须等校准句柄建好后再启动采样,否则 ADC 快照一直取不到值
+    const esp_timer_create_args_t vt = { .callback = btn_diag_cb, .name = "btn_diag" };
     esp_timer_handle_t vth = NULL;
     if (esp_timer_create(&vt, &vth) == ESP_OK) {
-        esp_timer_start_periodic(vth, 50 * 1000);   // 50ms 轮询,只在读数变化时打印
+        esp_timer_start_periodic(vth, 20 * 1000);   // 20ms 一格, 2 秒打印一行波形
     } else {
-        ESP_LOGW(TAG, "电压上报定时器创建失败,标定日志不可用");
+        ESP_LOGW(TAG, "诊断定时器创建失败, 波形不可用");
     }
 #endif
 
