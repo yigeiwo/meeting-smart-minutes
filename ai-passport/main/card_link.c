@@ -521,22 +521,50 @@ static esp_err_t ws_setup(const char *uri)
     return ESP_OK;
 }
 
-// 发送任务: 从流缓冲取整行 NDJSON, 以文本帧发出; 同时负责心跳
+// 发送任务: 从流缓冲按【整行】取出 NDJSON, 每行作为一帧发出; 同时负责心跳
+//
+// ⚠ 必须逐行成帧。原先这里是 `char buf[1024]` + 一次 xStreamBufferReceive 就把取到的
+// 字节整块当成一帧发出, 而单帧音频 JSON 约 1.4KB(base64 后) —— 结果每帧音频都被腰斩,
+// 服务端拿到的是半截 JSON:
+//     ERROR card_bridge: 处理卡片消息失败: Unterminated string starting at: line 1 column 33
+// 音频一帧都解析不出来, 提炼时是 0 字节音频, 于是永远出不了纪要。实机已验证。
 static void link_tx_task(void *arg)
 {
     (void)arg;
-    char buf[1024];
+    // 单行上限: 音频 JSON 上限 LINK_AUDIO_JSON(1600) + 换行, 再留余量
+    static char buf[LINK_AUDIO_JSON + 160];
+    size_t used = 0;
     uint32_t last_hb = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
 
     while (s_task_alive) {
-        size_t n = xStreamBufferReceive(s_tx_sb, buf, sizeof(buf), pdMS_TO_TICKS(200));
-        if (n > 0) {
+        if (used < sizeof(buf) - 1) {
+            size_t n = xStreamBufferReceive(s_tx_sb, buf + used, sizeof(buf) - 1 - used,
+                                            pdMS_TO_TICKS(200));
+            if (n > 0) used += n;
+        }
+
+        // 把缓冲里所有【完整行】(以 '\n' 结尾)逐行发出
+        size_t start = 0;
+        for (size_t i = 0; i < used; i++) {
+            if (buf[i] != '\n') continue;
+            const size_t len = i - start + 1;
             if (s_connected && s_ws) {
-                int sent = esp_websocket_client_send_text(s_ws, buf, (int)n, pdMS_TO_TICKS(5000));
+                const int sent = esp_websocket_client_send_text(s_ws, buf + start, (int)len,
+                                                               pdMS_TO_TICKS(5000));
                 if (sent < 0) {
                     set_error("WebSocket 文本帧发送失败");
                 }
             }
+            start = i + 1;
+        }
+        if (start > 0) {                       // 剩余的是半行, 留给下一轮拼完整
+            memmove(buf, buf + start, used - start);
+            used -= start;
+        }
+        if (used >= sizeof(buf) - 1) {
+            // 写入侧已限制单行长度, 走到这里说明遇到异常超长行: 如实丢弃并告警
+            ESP_LOGW(TAG, "发送缓冲里出现超过 %u 字节的单行, 整行丢弃", (unsigned)sizeof(buf));
+            used = 0;
         }
 
         uint32_t now = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
