@@ -156,6 +156,22 @@ DEFAULT_LLM_PROVIDERS = [
         "temperature": 0.3,
     },
     {
+        "id": "grok",
+        "name": "Grok (兼容网关)",
+        "base_url": "http://47.93.17.237:8866/v1",
+        "model": "grok-4.6",
+        # 实测可用(HTTP 200): grok-4.6 / grok-4.5 / grok-4.3 / grok-composer-2.5-fast
+        # 注意: grok-voice-* 只能用于 /audio/speech 语音合成, 不能作为对话模型。
+        "available_models": [
+            "grok-4.6",
+            "grok-4.5",
+            "grok-4.3",
+            "grok-composer-2.5-fast",
+        ],
+        "api_key": "",
+        "temperature": 0.3,
+    },
+    {
         "id": "ollama",
         "name": "本地私有化 (Ollama)",
         "base_url": "http://127.0.0.1:11434/v1",
@@ -196,9 +212,15 @@ class AppConfig:
     llm_providers: List[Dict[str, Any]] = field(default_factory=lambda: list(DEFAULT_LLM_PROVIDERS))
 
     # 语音转写 ASR 配置
+    # 说明: 转写与纪要可以走两个不同的服务。asr_* 留空时自动回落到 llm_*
+    # (历史上转写复用 LLM 的 key/base_url), 因此老配置依然可用。
     asr_provider: str = field(default_factory=lambda: os.getenv("ASR_PROVIDER", "whisper"))
     asr_api_key: str = field(default_factory=lambda: os.getenv("ASR_API_KEY", ""))
     asr_app_id: str = field(default_factory=lambda: os.getenv("ASR_APP_ID", ""))
+    asr_base_url: str = field(default_factory=lambda: os.getenv("ASR_BASE_URL", ""))
+    # 转写模型名。不同的 OpenAI 兼容网关用的名字不一样:
+    # OpenAI=whisper-1, 本项目的 grok 网关=grok-stt。
+    asr_model: str = field(default_factory=lambda: os.getenv("ASR_MODEL", "whisper-1"))
 
     # 默认会议总结场景模板 (general, tech, prd, business, brainstorm)
     default_scenario: str = field(default_factory=lambda: os.getenv("DEFAULT_SCENARIO", "general"))
@@ -234,6 +256,20 @@ class AppConfig:
     pg_user: str = field(default_factory=lambda: os.getenv("PG_USER", "postgres"))
     pg_password: str = field(default_factory=lambda: os.getenv("PG_PASSWORD", ""))
     database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+
+    # ---- 转写参数的实际取值: asr_* 优先, 留空则回落到 llm_* ----
+    # 这样"只配一个网关"的场景不用重复填两份凭据, 而想分开用两个服务时也能各自指定。
+    @property
+    def asr_effective_api_key(self) -> str:
+        return self.asr_api_key or self.llm_api_key
+
+    @property
+    def asr_effective_base_url(self) -> str:
+        return self.asr_base_url or self.llm_base_url
+
+    @property
+    def asr_effective_model(self) -> str:
+        return self.asr_model or "whisper-1"
 
 
 USER_CONFIGS_DIR = Path("records/user_configs")

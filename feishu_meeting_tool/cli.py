@@ -82,7 +82,10 @@ def main():
 
     elif args.command == "summarize":
         cfg = get_config()
-        pipeline = AudioPipeline(records_dir=cfg.records_dir, api_key=cfg.llm_api_key, base_url=cfg.llm_base_url)
+        pipeline = AudioPipeline(records_dir=cfg.records_dir,
+                                 api_key=cfg.asr_effective_api_key,
+                                 base_url=cfg.asr_effective_base_url,
+                                 model=cfg.asr_effective_model)
         summarizer = AISummarizer(api_key=cfg.llm_api_key, base_url=cfg.llm_base_url, model=cfg.llm_model)
 
         file_path = Path(args.file)

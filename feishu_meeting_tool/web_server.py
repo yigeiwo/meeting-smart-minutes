@@ -101,8 +101,10 @@ def get_audio_pipeline(user_id: Optional[str] = None) -> AudioPipeline:
     cfg = get_config(user_id)
     return AudioPipeline(
         records_dir=cfg.records_dir,
-        api_key=cfg.llm_api_key,
-        base_url=cfg.llm_base_url,
+        # 转写走 asr_* (留空回落 llm_*): 两个阶段可以分别指向不同服务
+        api_key=cfg.asr_effective_api_key,
+        base_url=cfg.asr_effective_base_url,
+        model=cfg.asr_effective_model,
     )
 
 
