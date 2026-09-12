@@ -41,6 +41,9 @@ static const char *TAG = "card_link";
 #define LINK_HEARTBEAT_MS   15000
 #define LINK_WS_TIMEOUT_MS  10000      // 网络超时
 #define LINK_WS_RETRY_MS    3000       // 断线重连退避
+// 离线超过该时长就彻底重建 WebSocket 客户端(销毁+新建)。实测被对端关闭后
+// esp_websocket_client 的自动重连不一定会再拉起来, 必须有这道兜底。
+#define LINK_WS_REBUILD_MS  8000
 
 // ---------------- 内部状态 ----------------
 static TaskHandle_t             s_link_task = NULL;
@@ -420,6 +423,9 @@ static void ws_event_cb(void *args, esp_event_base_t base, int32_t event_id, voi
         break;
 
     case WEBSOCKET_EVENT_CLOSED:
+        // 以前这里是静默的: 现场只能看到"连上又掉线", 却不知道是谁关的、什么时候关的。
+        ESP_LOGW(TAG, "WebSocket 连接已关闭 (对端关闭或链路异常); %s",
+                 s_connected ? "由看门狗重建连接" : "此前已处于未连接状态");
         if (s_connected) {
             s_connected = false;
             fire_event(CARD_LINK_EV_CONN_CHANGED);
@@ -550,30 +556,57 @@ static void link_task(void *arg)
 {
     (void)arg;
     char uri[LINK_URI_BUF] = {0};
+    uint32_t offline_since = 0;          // 0 = 已连接或尚无计时
 
     ESP_LOGI(TAG, "WebSocket 桥接客户端任务启动");
 
     while (s_task_alive) {
         if (!ble_prov_is_wifi_connected()) {
             s_connected = false;
+            offline_since = 0;
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
         if (!build_uri(uri, sizeof(uri))) {
             // 尚未配网下发工作台地址: 如实提示, 不伪造连接
             s_connected = false;
+            offline_since = 0;
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
+        const uint32_t now = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
+
         // 地址变化 (重新配网 / 切换 wss 或 ws) 时重建连接
         if (strcmp(uri, s_cur_uri) != 0) {
+            offline_since = 0;
             ws_teardown();
             if (ws_setup(uri) != ESP_OK) {
                 vTaskDelay(pdMS_TO_TICKS(LINK_WS_RETRY_MS));
                 continue;
             }
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
         }
+
+        // ★ 断线自愈看门狗
+        // 实机实测: 连接建立后若被对端关闭, esp_websocket_client 的自动重连不一定能
+        // 再次拉起来 —— 现象就是"连上一次后掉线, 此后再也不恢复"("上行消息未送达"一直刷)。
+        // 本循环原先只看 URI 变化, 这种静默关闭下什么都不会做, 所以必须兜底重建。
+        if (!s_connected) {
+            if (offline_since == 0) {
+                offline_since = now ? now : 1;
+            } else if (now - offline_since >= LINK_WS_REBUILD_MS) {
+                ESP_LOGW(TAG, "离线已达 %u ms, 重建 WebSocket 连接",
+                         (unsigned)(now - offline_since));
+                ws_teardown();
+                offline_since = 0;
+                continue;
+            }
+        } else {
+            offline_since = 0;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
