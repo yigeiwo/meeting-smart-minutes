@@ -9,6 +9,7 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char *TAG = "bsp_btn";
 
@@ -38,6 +39,33 @@ static void cb_press (void *a, void *u) { on_event(a, u, BSP_BTN_PRESS);  }
 static void cb_click (void *a, void *u) { on_event(a, u, BSP_BTN_CLICK);  }
 static void cb_double(void *a, void *u) { on_event(a, u, BSP_BTN_DOUBLE); }
 static void cb_long  (void *a, void *u) { on_event(a, u, BSP_BTN_LONG);   }
+
+// ---------------------------------------------------------------------------
+// 分压标定/排查用的电压上报
+//
+// 只在读数发生明显变化时打印一行,静止时完全不刷屏,所以常开也不影响使用。
+// 用途:换板或改分压阻值后,逐个按住三个键,从串口读出各自真实电压,再回填
+//       bsp_pins.h 的 BSP_BTN_MV_TABLE;也是"某个键没反应"时最快的定位手段 ——
+//       按下去若电压丝毫不变(仍是 ~3300mV),说明是硬件没接通,而不是阈值问题。
+// 不需要时把 BSP_BTN_VOLT_LOG 改成 0,定时器与代码一起被裁掉,零开销。
+// ---------------------------------------------------------------------------
+#define BSP_BTN_VOLT_LOG  1
+
+#if BSP_BTN_VOLT_LOG
+static void btn_volt_log_cb(void *arg) {
+    (void)arg;
+    static int s_last = -1;
+    const int mv = bsp_button_read_mv();
+    if (mv < 0) return;                       // ADC/校准未就绪
+    int delta = mv - s_last;
+    if (delta < 0) delta = -delta;
+    if (s_last < 0 || delta >= 60) {          // 60mV 门限: 三档间距最小也有 100mV 以上
+        ESP_LOGI(TAG, "按键分压 = %4d mV   (上键≈0 / 下键≈300 / 确定≈595 / 松开≈3300)",
+                 mv);
+        s_last = mv;
+    }
+}
+#endif
 
 esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
     s_cb = cb; s_user = user;
@@ -94,6 +122,17 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
         ESP_LOGW(TAG, "ADC 校准创建失败,Button 页将无法显示电压");
         s_cali = NULL;
     }
+
+#if BSP_BTN_VOLT_LOG
+    // 必须等校准句柄建好后再启动采样,否则 bsp_button_read_mv() 会一直返回 -1
+    const esp_timer_create_args_t vt = { .callback = btn_volt_log_cb, .name = "btn_volt" };
+    esp_timer_handle_t vth = NULL;
+    if (esp_timer_create(&vt, &vth) == ESP_OK) {
+        esp_timer_start_periodic(vth, 50 * 1000);   // 50ms 轮询,只在读数变化时打印
+    } else {
+        ESP_LOGW(TAG, "电压上报定时器创建失败,标定日志不可用");
+    }
+#endif
 
     ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压", BSP_BTN_ADC_CHANNEL);
     return ESP_OK;

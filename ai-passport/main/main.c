@@ -94,10 +94,14 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     if (!bsp_lvgl_lock(500)) return;
 
     if (s_active >= 0) {
-        // 彻底将【返回菜单】职责赋予【最上键 (UP)】：按住半秒或双击直接返回主功能菜单
-        // 中间键 (OK) 彻底解耦，专职用于业务操作 (录音)，零冲突、零误触
-        if (btn == BSP_BTN_UP && (ev == BSP_BTN_LONG || ev == BSP_BTN_DOUBLE)) {
-            ESP_LOGI(TAG, "上键触发返回主功能菜单: btn=%d, ev=%d", btn, ev);
+        // 【返回菜单】主路径是上键长按/双击。这里额外把"确定键长按"也接成备用返回路径:
+        // 一旦某个按键在硬件上失效(例如分压偏低被判成"无按键"),导航不会被彻底锁死,
+        // 上键或确定键任一可用就能退出。确定键的短按/双击仍原样交给 demo 处理,不受影响。
+        const int back_to_menu =
+            (btn == BSP_BTN_UP && (ev == BSP_BTN_LONG || ev == BSP_BTN_DOUBLE)) ||
+            (btn == BSP_BTN_OK && ev == BSP_BTN_LONG);
+        if (back_to_menu) {
+            ESP_LOGI(TAG, "返回主功能菜单: btn=%d, ev=%d", btn, ev);
             // 真实通知工作台: 卡片已返回功能菜单 (工作台同步切换为 MENU 画面)
             card_link_send_combo_menu();
             DEMOS[s_active].exit();
