@@ -180,7 +180,11 @@ void app_main(void) {
     }
 
     // 启动后台 BLE 蓝牙配网监听服务 (广播名称 FoloPassport, Service 0xFFF0, 自动恢复 NVS 历史网络)
-    ble_prov_start();
+    // 失败必须显式报出来: 配网任务没起来时, 手机仍能写入凭证但胸卡永远不会去连网,
+    // 现场只会表现为"写完没反应", 不留日志会非常难查。
+    if (ble_prov_start() != ESP_OK) {
+        ESP_LOGE(TAG, "BLE 配网服务启动失败: 手机可以写入凭证, 但胸卡不会连接 Wi-Fi");
+    }
 
     // 启动真实 TCP/NDJSON 桥接客户端: 连上电脑工作台的 5566 端口,
     // 上行录音音频/电量/状态, 下行接收真实会议纪要与反向指令

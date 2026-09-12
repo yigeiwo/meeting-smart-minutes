@@ -11,6 +11,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 
 #include "host/ble_hs.h"
@@ -265,6 +266,75 @@ static bool load_wifi_from_nvs(char *ssid, size_t max_ssid, char *pwd, size_t ma
     return (err1 == ESP_OK && strlen(ssid) > 0 && err2 == ESP_OK);
 }
 
+// ---------------------------------------------------------------------------
+// 配网专用任务
+//
+// ★ 重活绝不能放在 NimBLE 的 GATT 回调里直接做。
+//   GATT 访问回调运行在 NimBLE host 任务上, 该任务栈由
+//   CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE 决定(未配置时默认 4096 字节),
+//   而回调被调用时协议栈已经压了若干层帧。此时再执行
+//   esp_netif_create_default_wifi_sta() + esp_wifi_init() + 事件注册这一整套
+//   Wi-Fi 初始化(本身就需要 1.5KB 以上栈), 极易栈溢出 —— 现场表现正是
+//   "手机显示凭证已写入, 但胸卡既不联网、也不回报状态", 因为设备已经重启,
+//   而且重启后 NVS 里当然没有 Wi-Fi(凭证只在连上后才落盘)。
+//
+//   因此: 回调只把凭据塞进队列, 真正的 Wi-Fi 初始化/连接交给下面这个
+//   带独立栈的任务来做。
+// ---------------------------------------------------------------------------
+typedef struct {
+    char ssid[34];
+    char pwd[66];
+} prov_req_t;
+
+static QueueHandle_t s_prov_q;
+static TaskHandle_t  s_prov_task;
+static esp_err_t     do_connect_wifi(const char *ssid, const char *pwd);
+
+static void prov_task(void *arg) {
+    (void)arg;
+    prov_req_t req;
+    for (;;) {
+        if (xQueueReceive(s_prov_q, &req, portMAX_DELAY) != pdTRUE) continue;
+        if (req.ssid[0] == '\0') continue;
+        ESP_LOGI(TAG, "配网任务开始连接路由器: SSID=%s (密码长度=%u)",
+                 req.ssid, (unsigned)strlen(req.pwd));
+        esp_err_t e = do_connect_wifi(req.ssid, req.pwd);
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "启动 Wi-Fi 连接失败: %s", esp_err_to_name(e));
+        }
+    }
+}
+
+// 把一套凭据排进配网任务。回调侧与本函数都可能调用(开机自连走这里)。
+static void prov_enqueue(const char *ssid, const char *pwd) {
+    if (!s_prov_q) {
+        ESP_LOGE(TAG, "配网队列未就绪, 无法连接 %s", ssid ? ssid : "(null)");
+        return;
+    }
+    prov_req_t req = { 0 };
+    snprintf(req.ssid, sizeof(req.ssid), "%s", ssid ? ssid : "");
+    snprintf(req.pwd, sizeof(req.pwd), "%s", pwd ? pwd : "");
+    if (xQueueSend(s_prov_q, &req, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "配网任务正忙, 本次请求未排队 (SSID=%s)", req.ssid);
+    }
+}
+
+// Wi-Fi 断开原因码 -> 可执行结论。这几个码覆盖了配网现场的绝大多数失败。
+static const char *wifi_reason_hint(int reason) {
+    switch (reason) {
+    case 1:   return "未指定原因";
+    case 2:   return "认证过期, 通常仍是密码不正确";
+    case 15:  return "四次握手超时 —— 密码不正确(最常见)";
+    case 200: return "收不到 AP 信标, 信号太弱或距离太远";
+    case 201: return "没搜到这个 SSID —— 名称写错, 或这是 5GHz 网络(胸卡只支持 2.4GHz)";
+    case 202: return "认证失败, 密码不正确";
+    case 203: return "关联失败, 多为信号弱或 AP 连接数已满";
+    case 204: return "握手超时, 密码或信号问题";
+    case 205: return "AP 拒绝连接, 可能开了 MAC 白名单或已达上限";
+    default:  return "见 IDF wifi_err_reason_t 对照表";
+    }
+}
+
 // Wi-Fi 事件处理
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data) {
@@ -272,14 +342,19 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Wi-Fi STA 启动，尝试连接 %s...", s_cur_ssid);
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *d =
+            (const wifi_event_sta_disconnected_t *)event_data;
+        const int reason = d ? (int)d->reason : -1;
         if (s_state == BLE_PROV_STATE_CONNECTING) {
             if (s_retry_cnt < 5) {
                 s_retry_cnt++;
-                ESP_LOGW(TAG, "Wi-Fi 连接重试 (%d/5)...", s_retry_cnt);
+                ESP_LOGW(TAG, "Wi-Fi 第 %d/5 次重试; 上次失败 reason=%d (%s)",
+                         s_retry_cnt, reason, wifi_reason_hint(reason));
                 esp_wifi_connect();
             } else {
                 s_state = BLE_PROV_STATE_FAILED;
-                ESP_LOGE(TAG, "Wi-Fi 连接失败，请检查密码或信号");
+                ESP_LOGE(TAG, "Wi-Fi 连接失败: reason=%d (%s); SSID=%s",
+                         reason, wifi_reason_hint(reason), s_cur_ssid);
                 char notify[64];
                 snprintf(notify, sizeof(notify), "{\"status\":3,\"msg\":\"Connection failed\"}");
                 send_notify_msg(notify);
@@ -331,7 +406,9 @@ static esp_err_t do_connect_wifi(const char *ssid, const char *pwd) {
 
     esp_wifi_stop();
     esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
-    return esp_wifi_start();
+    esp_err_t se = esp_wifi_start();
+    ESP_LOGI(TAG, "Wi-Fi 已启动(%s), 等待 %s 的连接结果...", esp_err_to_name(se), ssid);
+    return se;
 }
 
 // GATT 访问回调
@@ -380,8 +457,13 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
             }
 
             if (strlen(ssid) > 0) {
-                ESP_LOGI(TAG, "准备连接 Wi-Fi: SSID=%s", ssid);
-                do_connect_wifi(ssid, pwd);
+                // 只排队, 不在这里做 Wi-Fi 初始化: 本回调运行在 NimBLE host 任务上,
+                // 该任务栈默认仅 4096 字节, 直接做 WiFi 初始化会栈溢出(见 prov_task 说明)。
+                ESP_LOGI(TAG, "凭据已收到并入队: SSID=%s (密码长度=%u)", ssid,
+                         (unsigned)strlen(pwd));
+                prov_enqueue(ssid, pwd);
+            } else {
+                ESP_LOGW(TAG, "报文里没有解析出 SSID, 手机下发的原文: %s", rx_buf);
             }
             return 0;
         }
@@ -490,6 +572,25 @@ esp_err_t ble_prov_start(void) {
     demo_radio_nvs_prepare();
     demo_radio_network_prepare();
 
+    // 0. 先建配网任务与队列: 后面所有 Wi-Fi 初始化都只能在它自己的栈上做
+    //    (NimBLE host 任务栈只有 4096 字节, 装不下 WiFi 初始化的开销)。
+    if (!s_prov_q) {
+        s_prov_q = xQueueCreate(1, sizeof(prov_req_t));
+    }
+    if (s_prov_q && !s_prov_task) {
+        // 6144 字节: esp_netif_create_default_wifi_sta + esp_wifi_init + 事件注册
+        // 这一套的实测栈开销在 2KB 上下, 留足冗余。
+        if (xTaskCreate(prov_task, "prov_wifi", 6144, NULL, 5, &s_prov_task) != pdPASS) {
+            ESP_LOGE(TAG, "配网任务创建失败");
+            s_prov_task = NULL;
+        }
+    }
+    if (!s_prov_q || !s_prov_task) {
+        // 没有配网任务 = 手机写入凭证后谁也不会去连网, 必须硬失败而不是静默失灵
+        ESP_LOGE(TAG, "配网任务/队列未就绪, 配网不可用");
+        return ESP_FAIL;
+    }
+
     // 1. 初始化 NimBLE 栈并注册配网 GATT 服务
     nimble_port_init();
     ble_svc_gap_init();
@@ -510,7 +611,7 @@ esp_err_t ble_prov_start(void) {
     char saved_pwd[66] = {0};
     if (load_wifi_from_nvs(saved_ssid, sizeof(saved_ssid), saved_pwd, sizeof(saved_pwd))) {
         ESP_LOGI(TAG, "从 NVS 恢复历史 Wi-Fi 凭证: SSID=%s，尝试后台自动连接...", saved_ssid);
-        do_connect_wifi(saved_ssid, saved_pwd);
+        prov_enqueue(saved_ssid, saved_pwd);
     } else {
         ESP_LOGI(TAG, "NVS 中暂无已保存 Wi-Fi，等待手机 BLE/NFC 配网...");
     }
