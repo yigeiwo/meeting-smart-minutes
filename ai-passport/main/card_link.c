@@ -281,6 +281,19 @@ static void dispatch_line(const char *line)
 {
     cJSON *root = cJSON_Parse(line);
     if (!root) {
+        // 下行字节流偶发会带几个噪声字节前缀(实测: 上一帧的 base64 尾部与下一帧黏在同一行),
+        // 整行丢弃会造成"工作台发了指令但胸卡不执行"——例如远程开始录音毫无反应。
+        // 因此退一步: 从第一个 '{' 重新解析, 仍然失败才如实丢弃。
+        const char *brace = strchr(line, '{');
+        if (brace && brace != line) {
+            root = cJSON_Parse(brace);
+            if (root) {
+                ESP_LOGW(TAG, "行首有 %d 字节噪声, 已跳过并成功解析该行",
+                         (int)(brace - line));
+            }
+        }
+    }
+    if (!root) {
         ESP_LOGW(TAG, "无法解析的行: %.80s", line);
         s_rx_lines++;
         return;
