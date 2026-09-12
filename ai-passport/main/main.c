@@ -91,8 +91,18 @@ static void enter_menu(void) {
 // 按键回调运行在 button 组件的任务里,操作 LVGL 必须加锁。
 static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     (void)user;
-    if (!bsp_lvgl_lock(500)) return;
 
+    // 每个按键事件都留痕。排查"某个键没反应"时,这条日志能直接把范围劈成两半:
+    //   日志里没有这个键 -> 事件根本没产生(ADC 阈值不匹配, 或按键硬件未接通)
+    //   日志里有但界面无反应 -> 事件到了, 问题在业务逻辑
+    // ev: 0=按下 1=单击 2=双击 3=长按;  btn: 0=上 1=下 2=确定
+    ESP_LOGI(TAG, "按键事件: btn=%d ev=%d (active=%d)", btn, ev, s_active);
+
+    if (!bsp_lvgl_lock(500)) {
+        // 以前这里是静默 return —— 丢事件却不留任何痕迹,排查时会被误判成"按键坏了"
+        ESP_LOGW(TAG, "LVGL 加锁超时, 丢弃按键事件: btn=%d ev=%d", btn, ev);
+        return;
+    }
     if (s_active >= 0) {
         // 【返回菜单】主路径是上键长按/双击。这里额外把"确定键长按"也接成备用返回路径:
         // 一旦某个按键在硬件上失效(例如分压偏低被判成"无按键"),导航不会被彻底锁死,
