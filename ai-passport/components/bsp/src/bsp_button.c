@@ -51,11 +51,16 @@ static void on_event(void *arg, void *usr_data, bsp_btn_ev_t ev) {
     if (i >= 0 && i < BSP_BTN_COUNT) {
         const int64_t now = esp_timer_get_time();
         if (!bsp_btn_filter_accepts_event(&s_filt[i], now, BSP_BTN_EVENT_TOL_US)) {
-            // 每秒最多提示一次, 避免坏读数频繁时刷屏
-            static int64_t s_last_warn_us;
-            if (now - s_last_warn_us > 1000000) {
+            // 坏读数每秒都会出现若干次, 这里必须重度限频: 否则串口被这条告警刷满,
+            // 真正有用的配网/桥接日志会被挤掉(C3 的 USB-JTAG 控制台扛不住)。
+            static int64_t  s_last_warn_us;
+            static uint32_t s_dropped;
+            s_dropped++;
+            if (now - s_last_warn_us > 60 * 1000000) {
+                ESP_LOGW(TAG, "已丢弃 %u 个疑似坏读数按键事件 (最近: btn=%d ev=%d); 未经连续采样确认",
+                         (unsigned)s_dropped, i, ev);
+                s_dropped = 0;
                 s_last_warn_us = now;
-                ESP_LOGW(TAG, "丢弃按键 %d 的坏读数事件 (ev=%d): 未经连续采样确认", i, ev);
             }
             return;
         }

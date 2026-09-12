@@ -50,6 +50,20 @@ CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_HOST_BASED_PRIVACY=n
 CONFIG_BT_NIMBLE_NVS_PERSIST=n
-# 配网报文包含 Wi-Fi 凭据 + 工作台 wss 地址/路径/设备令牌, 需要更大的 ATT MTU
-# 以便单次 write 就能完整下发 (默认 256 会退化成多次 prepare write)
-CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=512
+
+# --- 内存预算 (ESP32-C3 无 PSRAM, 可用动态 RAM 只有约 190KB) ---
+# 本固件必须同时容纳: NimBLE(蓝牙配网) + Wi-Fi STA(桥接) + LVGL(屏幕) + I2S(音频)
+# + 带 TLS 的 WebSocket 客户端。实测四项开销: Wi-Fi 驱动初始化约 39KB,
+# NimBLE 约 30KB 起, LVGL 池 32KB, TLS 连接约 20KB 起。
+#
+# 配网报文实测约 151 字节, ATT MTU=256 时仍可单次 write 下发(需要 ≥154),
+# 把 MTU 从 512 降到 256 可显著缩小 NimBLE 的 msys 块开销。
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
+#
+# Wi-Fi 静态 RX 缓冲默认 10 个 x 1.6KB ≈ 16KB, 配网与 NDJSON 桥接用不到这么多,
+# 降到 6 个 (注意: 必须满足 RX_BA_WIN <= 2 x STATIC_RX_BUFFER_NUM, 默认窗口为 6)。
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+#
+# TLS 输入缓冲默认 16KB, 而本项目的下行报文都是短 JSON (会议纪要/指令),
+# 8KB 足够; 省下的内存留给 Wi-Fi 与桥接任务栈。
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192

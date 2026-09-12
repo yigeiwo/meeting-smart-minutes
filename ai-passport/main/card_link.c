@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
 
 #include "freertos/FreeRTOS.h"
@@ -407,7 +408,12 @@ static void ws_event_cb(void *args, esp_event_base_t base, int32_t event_id, voi
         break;
 
     case WEBSOCKET_EVENT_ERROR:
-        set_error("WebSocket 通信错误 (请检查域名解析、TLS 证书与网络)");
+        // 只记状态与内存, 不解析错误句柄内部结构(IDF 5.x 该结构变过好几次):
+        // 具体的失败原因由 esp_websocket_client / esp-tls 自己的 ERROR 日志给出,
+        // 那些日志的 tag 是 websocket_client / transport_ws / esp-tls。
+        ESP_LOGE(TAG, "WebSocket 通信错误: uri=%s, 空闲堆=%u; 详见上面 websocket_client/esp-tls 的报错",
+                 s_cur_uri, (unsigned)esp_get_free_heap_size());
+        set_error("WebSocket 通信错误 (请检查域名解析、TLS 证书与设备令牌)");
         break;
 
     case WEBSOCKET_EVENT_CLOSED:
@@ -527,6 +533,10 @@ static void link_tx_task(void *arg)
         uint32_t now = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
         if (now - last_hb >= LINK_HEARTBEAT_MS) {
             last_hb = now;
+            // 每 15 秒留一行带内存的心跳: 桥接连接失败时, "是没内存还是令牌不对"
+            // 全靠这一行区分(串口日志在现场是唯一线索)。
+            ESP_LOGI(TAG, "心跳: 已连接工作台=%d, 空闲堆=%u 字节",
+                     (int)s_connected, (unsigned)esp_get_free_heap_size());
             tx_json_simple("{\"type\":\"ping\"}");
         }
     }
@@ -574,23 +584,40 @@ esp_err_t card_link_start(void)
 {
     if (s_task_alive) return ESP_OK;
 
+    // 桥接客户端起不来时, 胸卡会一直在"等待无线网络/正在连接工作台"之间徘徊,
+    // 而现象与"服务端令牌不对"完全一样。所以这里必须把每一步的失败与当时的空闲堆
+    // 都记下来 —— C3 无 PSRAM, Wi-Fi + NimBLE + LVGL 之后留给桥接的内存很紧。
+    ESP_LOGI(TAG, "桥接客户端启动前: 空闲堆=%u 字节",
+             (unsigned)esp_get_free_heap_size());
+
     if (!s_tx_sb) {
         s_tx_sb = xStreamBufferCreate(LINK_TX_SB_SIZE, 1);
-        if (!s_tx_sb) return ESP_ERR_NO_MEM;
+        if (!s_tx_sb) {
+            ESP_LOGE(TAG, "发送缓冲创建失败 (需要 %d 字节), 空闲堆=%u",
+                     LINK_TX_SB_SIZE, (unsigned)esp_get_free_heap_size());
+            return ESP_ERR_NO_MEM;
+        }
     }
     if (!s_tx_mtx) s_tx_mtx = xSemaphoreCreateMutex();
     if (!s_sum_mtx) s_sum_mtx = xSemaphoreCreateMutex();
-    if (!s_tx_mtx || !s_sum_mtx) return ESP_ERR_NO_MEM;
+    if (!s_tx_mtx || !s_sum_mtx) {
+        ESP_LOGE(TAG, "互斥量创建失败, 空闲堆=%u", (unsigned)esp_get_free_heap_size());
+        return ESP_ERR_NO_MEM;
+    }
 
     s_task_alive = true;
     if (xTaskCreate(link_task, "card_link", 5120, NULL, 4, &s_link_task) != pdPASS) {
         s_task_alive = false;
+        ESP_LOGE(TAG, "连接任务创建失败 (栈 5120), 空闲堆=%u",
+                 (unsigned)esp_get_free_heap_size());
         return ESP_ERR_NO_MEM;
     }
     if (xTaskCreate(link_tx_task, "card_tx", 4096, NULL, 5, &s_tx_task) != pdPASS) {
-        ESP_LOGE(TAG, "发送任务创建失败");
+        ESP_LOGE(TAG, "发送任务创建失败 (栈 4096), 空闲堆=%u",
+                 (unsigned)esp_get_free_heap_size());
     }
-    ESP_LOGI(TAG, "WebSocket 桥接客户端已启动");
+    ESP_LOGI(TAG, "WebSocket 桥接客户端已启动: 空闲堆=%u 字节",
+             (unsigned)esp_get_free_heap_size());
     return ESP_OK;
 }
 
