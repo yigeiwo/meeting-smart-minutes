@@ -30,7 +30,10 @@
 
 static const char *TAG = "card_link";
 
-#define LINK_TX_SB_SIZE     16384      // NDJSON 发送缓冲 (含音频帧)
+// NDJSON 发送缓冲: 8KB 可容纳约 5 帧音频(单帧约 1.4KB base64)。
+// 原为 16KB —— 实测启动后只剩 3KB 空闲堆, 而 wss 握手需要约 20KB, 只能从各处挤:
+// 缓冲满时音频帧会被真实丢弃并计入 drops, 不假装已送达。
+#define LINK_TX_SB_SIZE     8192
 #define LINK_LINE_BUF       2048       // 接收行缓冲 (lcd_frame 等超大帧按前缀丢弃)
 #define LINK_AUDIO_JSON     1600       // 单帧音频 JSON 上限 (1024B PCM -> ~1.4KB base64)
 #define LINK_AUDIO_HEAD     48         // 音频帧 JSON 头部预留 (实际长度按写入量计算)
@@ -606,14 +609,14 @@ esp_err_t card_link_start(void)
     }
 
     s_task_alive = true;
-    if (xTaskCreate(link_task, "card_link", 5120, NULL, 4, &s_link_task) != pdPASS) {
+    if (xTaskCreate(link_task, "card_link", 4096, NULL, 4, &s_link_task) != pdPASS) {
         s_task_alive = false;
-        ESP_LOGE(TAG, "连接任务创建失败 (栈 5120), 空闲堆=%u",
+        ESP_LOGE(TAG, "连接任务创建失败 (栈 4096), 空闲堆=%u",
                  (unsigned)esp_get_free_heap_size());
         return ESP_ERR_NO_MEM;
     }
-    if (xTaskCreate(link_tx_task, "card_tx", 4096, NULL, 5, &s_tx_task) != pdPASS) {
-        ESP_LOGE(TAG, "发送任务创建失败 (栈 4096), 空闲堆=%u",
+    if (xTaskCreate(link_tx_task, "card_tx", 3072, NULL, 5, &s_tx_task) != pdPASS) {
+        ESP_LOGE(TAG, "发送任务创建失败 (栈 3072), 空闲堆=%u",
                  (unsigned)esp_get_free_heap_size());
     }
     ESP_LOGI(TAG, "WebSocket 桥接客户端已启动: 空闲堆=%u 字节",

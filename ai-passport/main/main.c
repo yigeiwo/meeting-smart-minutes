@@ -18,6 +18,7 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_system.h"    // esp_get_free_heap_size(): C3 内存很紧, 每步都要能看见占用
 
 static const char *TAG = "main";
 
@@ -171,6 +172,9 @@ void app_main(void) {
     s_ok[1] = (bsp_button_init(on_key, NULL) == ESP_OK);
     s_ok[3] = (bsp_audio_init() == ESP_OK);
     s_ok[4] = (bsp_battery_init() == ESP_OK);
+    // C3 无 PSRAM, 这份固件要把 Wi-Fi + BLE + 屏幕 + 音频 + TLS 桥接塞进约 190KB,
+    // 每一步的堆占用都必须是可观测的, 否则"桥接连不上"到底是没内存还是配置错无法判断。
+    ESP_LOGI(TAG, "堆占用: 外设初始化后剩余 %u 字节", (unsigned)esp_get_free_heap_size());
 
     if (bsp_lvgl_lock(1000)) { 
         // 默认直接开机进入飞书会议智能页面
