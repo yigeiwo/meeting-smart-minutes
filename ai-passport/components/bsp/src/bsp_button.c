@@ -43,43 +43,75 @@ static void cb_long  (void *a, void *u) { on_event(a, u, BSP_BTN_LONG);   }
 // ---------------------------------------------------------------------------
 // 分压诊断
 //
-// ⚠ 排查"某个键自发乱跳"时, 不要用周期性 adc_oneshot_read 去观测 —— 那会在按键
-//   组件之外再开一路读者, 把嫌疑和观测手段混在一起。这里改为【只读数字电平】
-//   (gpio_get_level 不经过 ADC), 20ms 一格记录 GPIO0 的原始波形, 每 2 秒打印一行;
-//   同时用 1Hz 的 ADC 采样给出 raw/mV 做参照。两类证据对照即可判定:
-//     数字波形也是一串低电平 -> 引脚被真实拉低 (硬件通路问题)
-//     数字波形恒为高, 却有按键事件 -> ADC 读数被污染 (驱动/衰减配置问题)
+// 实测结论(已用 gpio_get_level 交叉验证过):
+//   引脚一旦配置成 ADC 输入, 数字输入通路就被关闭 —— gpio_get_level(GPIO0) 恒为 0,
+//   而此时 ADC 稳定读到 raw=4095(满量程, 约 3024mV)。所以数字电平【不能】当判据,
+//   判断"按键是不是被真实按下"只能看 ADC 的 raw。
+//
+// 本诊断以 10ms 为一格, 记录 raw 落在各电压窗口的情况, 每 2 秒打印一行分类波形:
+//   U=上键窗口(0~140mV)  D=下键窗口(180~430)  O=确定窗口(460~1200)
+//   -=窗口之间的空隙      .=松开(>1200)        !=读失败
+// 并统计【最长连续 U 格数】: 真人按键会连续压住几十格, 偶发坏读数通常只占 1 格,
+// 这个数字决定了滤波窗口该取多长。
 // 不需要时把 BSP_BTN_DIAG 改成 0, 定时器与代码一起被裁掉, 零开销。
 // ---------------------------------------------------------------------------
 #define BSP_BTN_DIAG  1
 
 #if BSP_BTN_DIAG
-// 100 格 x 20ms = 2 秒一行
+static char s_diag_tr[201];      // 200 格 x 10ms = 2 秒
+
 static void btn_diag_cb(void *arg) {
     (void)arg;
-    static char tr[101];
-    static int  idx = 0, hi = 0, lo = 0, jumps = 0, last = -1;
-    static int  sec = 0;
+    static int idx = 0, sec = 0;
+    static int u_cnt = 0, u_run = 0, u_maxrun = 0;
+    static int u_raw_min = 99999, u_raw_max = -1;
+    static int raw_min = 99999, raw_max = -1, fails = 0;
 
-    const int lv = gpio_get_level(GPIO_NUM_0);
-    tr[idx++] = lv ? '1' : '0';
-    if (lv) hi++; else lo++;
-    if (last >= 0 && lv != last) jumps++;
-    last = lv;
+    int raw = 0, mv = -1;
+    esp_err_t e = s_adc ? adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) : ESP_FAIL;
+    if (e == ESP_OK && s_cali) {
+        if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) mv = -1;
+    } else {
+        mv = -1;
+    }
 
-    if (idx >= 100) {
-        tr[idx] = '\0';
-        int raw = 0, mv = -1;
-        if (s_adc && s_cali) {
-            if (adc_oneshot_read(s_adc, BSP_BTN_ADC_CHANNEL, &raw) == ESP_OK) {
-                if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) mv = -2;
-            } else {
-                mv = -3;
-            }
+    char c;
+    if (mv < 0) {
+        c = '!'; fails++;
+        if (u_run > u_maxrun) u_maxrun = u_run;
+        u_run = 0;
+    } else {
+        if (raw < raw_min) raw_min = raw;
+        if (raw > raw_max) raw_max = raw;
+        if (mv <= 140) {                       // 上键窗口
+            c = 'U'; u_cnt++; u_run++;
+            if (u_run > u_maxrun) u_maxrun = u_run;
+            if (raw < u_raw_min) u_raw_min = raw;
+            if (raw > u_raw_max) u_raw_max = raw;
+        } else {
+            if (u_run > u_maxrun) u_maxrun = u_run;
+            u_run = 0;
+            if (mv < 180)        c = '-';
+            else if (mv <= 430)  c = 'D';
+            else if (mv < 460)   c = '-';
+            else if (mv <= 1200) c = 'O';
+            else                 c = '.';
         }
-        ESP_LOGI(TAG, "[%02ds] GPIO0 波形(20ms/格, 1=高 0=低): %s", sec, tr);
-        ESP_LOGI(TAG, "      高%d 低%d 跳变%d | ADC快照 raw=%d mv=%d", hi, lo, jumps, raw, mv);
-        idx = 0; hi = lo = jumps = 0; sec += 2;
+    }
+    if (idx < 200) s_diag_tr[idx++] = c;
+
+    if (idx >= 200) {
+        s_diag_tr[idx] = '\0';
+        ESP_LOGI(TAG, "[%02ds] %s", sec, &s_diag_tr[0]);
+        ESP_LOGI(TAG, "       %s", &s_diag_tr[100]);
+        ESP_LOGI(TAG, "       U格%d 最长连续%d格(%dms) U内raw=%d~%d | 全程raw=%d~%d 读失败%d",
+                 u_cnt, u_maxrun, u_maxrun * 10,
+                 u_raw_min > 99999 ? -1 : u_raw_min, u_raw_max,
+                 raw_min > 99999 ? -1 : raw_min, raw_max, fails);
+        idx = 0; sec += 2;
+        u_cnt = u_run = u_maxrun = 0; fails = 0;
+        u_raw_min = 99999; u_raw_max = -1;
+        raw_min = 99999; raw_max = -1;
     }
 }
 #endif
@@ -151,7 +183,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
     const esp_timer_create_args_t vt = { .callback = btn_diag_cb, .name = "btn_diag" };
     esp_timer_handle_t vth = NULL;
     if (esp_timer_create(&vt, &vth) == ESP_OK) {
-        esp_timer_start_periodic(vth, 20 * 1000);   // 20ms 一格, 2 秒打印一行波形
+        esp_timer_start_periodic(vth, 10 * 1000);   // 10ms 一格, 2 秒打印一行波形
     } else {
         ESP_LOGW(TAG, "诊断定时器创建失败, 波形不可用");
     }
