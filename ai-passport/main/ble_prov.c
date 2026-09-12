@@ -6,6 +6,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 
@@ -376,39 +377,111 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+// Wi-Fi 驱动初始化(只做一次)。
+//
+// ⚠ 两个硬性要求:
+//   1. 每一步都要检查返回值。之前这一整套的返回值全被忽略, 而且无条件把 s_wifi_init
+//      置成 true, 结果 esp_wifi_init 失败后 esp_wifi_start() 只回一个
+//      ESP_ERR_WIFI_NOT_INIT, 现场看到的就只有"手机写完了但胸卡不联网", 完全看不出原因。
+//   2. 必须在堆最充裕的时候调用(见 ble_prov_start 里的调用点)。C3 只有约 190KB 可用
+//      动态 RAM, 而这个固件同时跑 NimBLE(MTU 512) + LVGL + I2S 音频 + 带 TLS 的
+//      WebSocket 客户端; 等到配网时才懒加载 Wi-Fi 驱动, esp_wifi_init 极易因内存不足
+//      失败。故意不在这里做"失败兜底重试"之类的花活 —— 失败就把真实错误码和堆数据打出来。
+static esp_err_t wifi_driver_init_once(void) {
+    if (s_wifi_init) return ESP_OK;
+
+    ESP_LOGI(TAG, "Wi-Fi 初始化前: 空闲堆=%u 字节, 最大连续块=%u 字节",
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+    if (!s_sta_netif) {
+        s_sta_netif = esp_netif_create_default_wifi_sta();
+        if (!s_sta_netif) {
+            ESP_LOGE(TAG, "esp_netif_create_default_wifi_sta() 返回空");
+            return ESP_FAIL;
+        }
+    }
+
+    const wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_err_t e = esp_wifi_init(&cfg);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_init 失败: %s (空闲堆=%u 字节, 最大连续块=%u 字节)",
+                 esp_err_to_name(e), (unsigned)esp_get_free_heap_size(),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        return e;
+    }
+
+    e = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                           &wifi_event_handler, NULL, NULL);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "注册 WIFI_EVENT 处理失败: %s", esp_err_to_name(e));
+        return e;
+    }
+    e = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                           &wifi_event_handler, NULL, NULL);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "注册 IP_EVENT 处理失败: %s", esp_err_to_name(e));
+        return e;
+    }
+    e = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_mode(STA) 失败: %s", esp_err_to_name(e));
+        return e;
+    }
+
+    s_wifi_init = true;
+    ESP_LOGI(TAG, "Wi-Fi 驱动初始化完成: 空闲堆=%u 字节",
+             (unsigned)esp_get_free_heap_size());
+    return ESP_OK;
+}
+
 // 启动 Wi-Fi 连接流程
 static esp_err_t do_connect_wifi(const char *ssid, const char *pwd) {
     if (!ssid || strlen(ssid) == 0) return ESP_ERR_INVALID_ARG;
+
+    char notify[64];
+    snprintf(notify, sizeof(notify), "{\"status\":1,\"msg\":\"Connecting to %s...\"}", ssid);
+
+    esp_err_t e = wifi_driver_init_once();
+    if (e != ESP_OK) {
+        // 必须回报手机: 否则配网页会一直停在"等待胸卡接入网络", 用户拿不到任何结论
+        s_state = BLE_PROV_STATE_FAILED;
+        send_notify_msg("{\"status\":3,\"msg\":\"Wi-Fi driver init failed\"}");
+        return e;
+    }
 
     s_state = BLE_PROV_STATE_CONNECTING;
     s_retry_cnt = 0;
     strncpy(s_cur_ssid, ssid, sizeof(s_cur_ssid) - 1);
     strncpy(s_cur_pwd, pwd, sizeof(s_cur_pwd) - 1);
-
-    char notify[64];
-    snprintf(notify, sizeof(notify), "{\"status\":1,\"msg\":\"Connecting to %s...\"}", ssid);
     send_notify_msg(notify);
-
-    if (!s_wifi_init) {
-        s_sta_netif = esp_netif_create_default_wifi_sta();
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        esp_wifi_init(&cfg);
-        esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL);
-        esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL);
-        esp_wifi_set_mode(WIFI_MODE_STA);
-        s_wifi_init = true;
-    }
 
     wifi_config_t wifi_cfg = { 0 };
     strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid) - 1);
     strncpy((char *)wifi_cfg.sta.password, pwd, sizeof(wifi_cfg.sta.password) - 1);
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
-    esp_wifi_stop();
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
-    esp_err_t se = esp_wifi_start();
-    ESP_LOGI(TAG, "Wi-Fi 已启动(%s), 等待 %s 的连接结果...", esp_err_to_name(se), ssid);
-    return se;
+    // 停掉上一次的 STA, 换上新凭据再起: 两步的返回值都要看
+    esp_err_t se = esp_wifi_stop();
+    if (se != ESP_OK && se != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGW(TAG, "esp_wifi_stop 返回 %s (继续尝试设置新凭据)", esp_err_to_name(se));
+    }
+    se = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+    if (se != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_config 失败: %s", esp_err_to_name(se));
+        s_state = BLE_PROV_STATE_FAILED;
+        send_notify_msg("{\"status\":3,\"msg\":\"set_config failed\"}");
+        return se;
+    }
+    se = esp_wifi_start();
+    if (se != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_start 失败: %s (SSID=%s)", esp_err_to_name(se), ssid);
+        s_state = BLE_PROV_STATE_FAILED;
+        send_notify_msg("{\"status\":3,\"msg\":\"wifi start failed\"}");
+        return se;
+    }
+    ESP_LOGI(TAG, "Wi-Fi 已启动, 等待 %s 的连接结果...", ssid);
+    return ESP_OK;
 }
 
 // GATT 访问回调
@@ -591,7 +664,17 @@ esp_err_t ble_prov_start(void) {
         return ESP_FAIL;
     }
 
-    // 1. 初始化 NimBLE 栈并注册配网 GATT 服务
+    // 1. 先把 Wi-Fi 驱动初始化好, 再起 NimBLE。
+    //    ★ 顺序很重要: 这里是整个启动过程中堆最充裕的时刻。实测在配网时才懒加载
+    //    Wi-Fi(即放在 NimBLE + LVGL + TLS WebSocket 客户端都起来之后), esp_wifi_init
+    //    会失败, 而失败后的 esp_wifi_start() 只回一个 ESP_ERR_WIFI_NOT_INIT, 现场表现
+    //    就是"手机显示凭证已写入, 但胸卡永远不联网"。
+    //    失败不 return: BLE 配网仍需继续工作, 以便把真实失败原因回报给手机。
+    if (wifi_driver_init_once() != ESP_OK) {
+        ESP_LOGE(TAG, "Wi-Fi 驱动初始化失败 —— 配网将无法连接网络, 请对照上面的错误码与堆数据");
+    }
+
+    // 2. 初始化 NimBLE 栈并注册配网 GATT 服务
     nimble_port_init();
     ble_svc_gap_init();
     ble_svc_gatt_init();
@@ -621,6 +704,10 @@ esp_err_t ble_prov_start(void) {
 
 bool ble_prov_is_wifi_connected(void) {
     return (s_state == BLE_PROV_STATE_CONNECTED);
+}
+
+bool ble_prov_owns_wifi(void) {
+    return s_wifi_init;
 }
 
 ble_prov_state_t ble_prov_get_state(void) {

@@ -1,6 +1,7 @@
 // main/demo_wifi.c —— STA 模式扫描附近 AP，不连接网络、不保存凭证。
 #include "demo.h"
 #include "demo_radio.h"
+#include "ble_prov.h"
 #include "ui_pixel.h"
 
 #include "esp_event.h"
@@ -64,6 +65,17 @@ static esp_err_t start_scan(void)
 static esp_err_t wifi_start(void)
 {
     s_state = WIFI_DEMO_STARTING;
+
+    // 配网服务在开机时就把 Wi-Fi 驱动初始化好了(它才是 Wi-Fi 的所有者)。
+    // 本页若再走一遍 init / set_storage / destroy, 退出时会把配网与桥接共用的驱动
+    // 拆掉 —— 之后胸卡再也连不上网, 而且现场只表现为"配网突然不工作了"。
+    if (ble_prov_owns_wifi()) {
+        s_error = ESP_ERR_INVALID_STATE;
+        s_state = WIFI_DEMO_FAILED;
+        ESP_LOGW(TAG, "Wi-Fi 驱动已由配网服务持有, 本扫描页暂不可用");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     esp_err_t err = demo_radio_nvs_prepare();
     if (err != ESP_OK) goto fail;
     err = demo_radio_network_prepare();

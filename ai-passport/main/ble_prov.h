@@ -27,6 +27,15 @@ esp_err_t ble_prov_start(void);
 bool ble_prov_is_wifi_connected(void);
 
 /**
+ * @brief Wi-Fi 驱动是否已由配网服务初始化并持有
+ *
+ * 供 demo 页面判断: 配网服务持有 Wi-Fi 后, 其它页面不得再
+ * esp_wifi_init/deinit、set_storage 或销毁默认 STA netif,
+ * 否则会把配网与桥接共用的 Wi-Fi 驱动拆掉(退出该页后胸卡再也连不上网)。
+ */
+bool ble_prov_owns_wifi(void);
+
+/**
  * @brief 获取当前配网与网络状态
  */
 ble_prov_state_t ble_prov_get_state(void);
