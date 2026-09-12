@@ -479,8 +479,8 @@ static esp_err_t ws_setup(const char *uri)
     cfg.uri = s_cur_uri;                     // 必须指向持久内存
     cfg.reconnect_timeout_ms = LINK_WS_RETRY_MS;
     cfg.network_timeout_ms = LINK_WS_TIMEOUT_MS;
-    cfg.buffer_size = 2048;                  // 单次读取上限; 更大的帧会分多次 DATA 事件送达
-    cfg.task_stack = 6144;
+    cfg.buffer_size = 1024;                  // 单次读取上限; 更大的帧会分多次 DATA 事件送达
+    cfg.task_stack = 5120;
     cfg.task_prio = 5;
     cfg.disable_auto_reconnect = false;
 

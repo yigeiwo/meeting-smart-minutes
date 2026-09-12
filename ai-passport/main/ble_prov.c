@@ -41,6 +41,7 @@ static uint16_t s_notify_val_handle = 0;
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint8_t  s_addr_type = 0;
 static bool     s_ble_started = false;
+static bool     s_ble_released = false;   // BLE 栈已释放(配网完成后让内存给桥接)
 static bool     s_wifi_init = false;
 
 static volatile ble_prov_state_t s_state = BLE_PROV_STATE_IDLE;
@@ -201,6 +202,9 @@ static void parse_credentials(const char *input, char *out_ssid, size_t max_ssid
 
 // 向连接的手机发送 GATT Notify 通知状态
 static void send_notify_msg(const char *msg) {
+    // BLE 栈释放后句柄已失效: 例如 Wi-Fi 断线重连会再次触发 IP 事件, 若此时还去
+    // notify 就会访问已释放的内存。配网早已完成, 直接忽略即可。
+    if (s_ble_released) return;
     if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE || s_notify_val_handle == 0) return;
     struct os_mbuf *om = ble_hs_mbuf_from_flat(msg, strlen(msg));
     if (om) {
@@ -285,17 +289,59 @@ static bool load_wifi_from_nvs(char *ssid, size_t max_ssid, char *pwd, size_t ma
 typedef struct {
     char ssid[34];
     char pwd[66];
+    bool release_ble;   // true = 只释放 BLE 栈, 不连网 (见 ble_prov_release_ble)
 } prov_req_t;
 
-static QueueHandle_t s_prov_q;
-static TaskHandle_t  s_prov_task;
-static esp_err_t     do_connect_wifi(const char *ssid, const char *pwd);
+static QueueHandle_t      s_prov_q;
+static TaskHandle_t       s_prov_task;
+static SemaphoreHandle_t  s_host_stopped;   // host 任务退出信号, 供 ble_teardown 等待
+static esp_err_t          do_connect_wifi(const char *ssid, const char *pwd);
+
+// 释放 BLE 协议栈, 把内存让给 wss/TLS 桥接。
+//
+// 蓝牙只服务于配网; 而 C3 无 PSRAM, 一次 wss(TLS) 握手要约 20KB, 配网完成后继续
+// 占着 NimBLE 会让握手因内存不足失败(实测桥接启动后仅剩 3KB 空闲堆)。
+// 释放后如需重新配网, 重启胸卡即可 —— 开机会重新起广播。
+static void ble_teardown(void) {
+    if (s_ble_released) return;
+
+    ESP_LOGI(TAG, "为桥接释放 BLE 协议栈: 释放前空闲堆=%u 字节",
+             (unsigned)esp_get_free_heap_size());
+    ble_gap_adv_stop();
+
+    const int rc = nimble_port_stop();
+    if (rc != 0) {
+        ESP_LOGW(TAG, "nimble_port_stop 返回 %d, BLE 未释放", rc);
+        return;
+    }
+    // 必须等 host 任务真正退出再 deinit, 否则会释放仍在使用的内存。
+    // 给个上限, 避免异常时把配网任务卡死。
+    if (s_host_stopped &&
+        xSemaphoreTake(s_host_stopped, pdMS_TO_TICKS(3000)) != pdTRUE) {
+        ESP_LOGW(TAG, "等待 NimBLE host 任务退出超时, 跳过 deinit");
+        return;
+    }
+    nimble_port_deinit();
+    s_ble_started = false;
+    s_ble_released = true;
+    ESP_LOGI(TAG, "BLE 已释放: 空闲堆=%u 字节 (需要重新配网时请重启胸卡)",
+             (unsigned)esp_get_free_heap_size());
+}
 
 static void prov_task(void *arg) {
     (void)arg;
     prov_req_t req;
     for (;;) {
         if (xQueueReceive(s_prov_q, &req, portMAX_DELAY) != pdTRUE) continue;
+
+        if (req.release_ble) {
+            // 延迟 8 秒再释放: 先让"配网成功"的 BLE 通知真正送到手机, 也给桥接第一次
+            // 握手留出时间; 万一第一次因内存不足失败, 释放后它的自动重连就能成功。
+            vTaskDelay(pdMS_TO_TICKS(8000));
+            ble_teardown();
+            continue;
+        }
+
         if (req.ssid[0] == '\0') continue;
         ESP_LOGI(TAG, "配网任务开始连接路由器: SSID=%s (密码长度=%u)",
                  req.ssid, (unsigned)strlen(req.pwd));
@@ -303,6 +349,15 @@ static void prov_task(void *arg) {
         if (e != ESP_OK) {
             ESP_LOGE(TAG, "启动 Wi-Fi 连接失败: %s", esp_err_to_name(e));
         }
+    }
+}
+
+void ble_prov_release_ble(void) {
+    if (!s_ble_started || s_ble_released) return;
+    prov_req_t r = { 0 };
+    r.release_ble = true;
+    if (!s_prov_q || xQueueSend(s_prov_q, &r, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "释放 BLE 的请求未能入队 (配网任务忙)");
     }
 }
 
@@ -374,6 +429,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         char notify[96];
         snprintf(notify, sizeof(notify), "{\"status\":2,\"ip\":\"%s\",\"ssid\":\"%s\"}", s_ip_str, s_cur_ssid);
         send_notify_msg(notify);
+
+        // 配网已完成: 稍后释放 BLE 协议栈, 把内存让给 wss/TLS 桥接(见 ble_teardown)。
+        ble_prov_release_ble();
     }
 }
 
@@ -601,6 +659,10 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
 }
 
 static int ble_prov_advertise(void) {
+    // BLE 栈已释放(配网完成后为桥接腾内存): 任何残留的广播重启请求都必须挡掉,
+    // 否则会访问已 deinit 的协议栈。
+    if (s_ble_released) return -1;
+
     struct ble_hs_adv_fields fields = { 0 };
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name = (const uint8_t *)DEVICE_NAME;
@@ -635,7 +697,11 @@ static void on_sync(void) {
 }
 
 static void host_task(void *arg) {
+    (void)arg;
     nimble_port_run();
+    // 先通知等待者, 再销毁任务: ble_teardown() 靠这个信号确认 host 任务已退出,
+    // 否则 nimble_port_deinit() 可能释放仍在使用的内存。
+    if (s_host_stopped) xSemaphoreGive(s_host_stopped);
     nimble_port_freertos_deinit();
 }
 
@@ -649,6 +715,10 @@ esp_err_t ble_prov_start(void) {
     //    (NimBLE host 任务栈只有 4096 字节, 装不下 WiFi 初始化的开销)。
     if (!s_prov_q) {
         s_prov_q = xQueueCreate(1, sizeof(prov_req_t));
+    }
+    if (!s_host_stopped) {
+        // ble_teardown() 用它确认 NimBLE host 任务已退出
+        s_host_stopped = xSemaphoreCreateBinary();
     }
     if (s_prov_q && !s_prov_task) {
         // 6144 字节: esp_netif_create_default_wifi_sta + esp_wifi_init + 事件注册

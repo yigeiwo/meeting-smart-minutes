@@ -31,9 +31,10 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
-# 本 UI 只有少量标签 + 一个像素吉祥物, 32KB 池对 C3 来说太奢侈:
-# 实测启动后仅剩 3KB, 而一次 wss(TLS) 连接需要约 20KB, 必须把池降下来。
-CONFIG_LV_MEM_SIZE_KILOBYTES=20
+# ⚠ 实测: 降到 20KB 会让飞书会议页在创建控件时分配失败, 直接
+#   "Guru Meditation Error: Store access fault" 反复重启(16 次/18 秒)。
+#   本 UI 的会话/看板页确实需要 32KB, 不要为了省内存再降这一项。
+CONFIG_LV_MEM_SIZE_KILOBYTES=32
 CONFIG_LV_TXT_ENC_UTF8=y
 CONFIG_LV_TXT_ENC_ASCII=n
 CONFIG_LV_USE_FONT_COMPRESSED=y
@@ -63,7 +64,8 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=n
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
 #
 # Wi-Fi 静态 RX 缓冲默认 10 个 x 1.6KB ≈ 16KB, 配网与 NDJSON 桥接用不到这么多,
-# 降到 6 个 (注意: 必须满足 RX_BA_WIN <= 2 x STATIC_RX_BUFFER_NUM, 默认窗口为 6)。
+# 降到 6 个 (这是 v1.1.7 起 CI 实机验证过的组合; 注意 Kconfig 约束
+# RX_BA_WIN <= 2 x STATIC_RX_BUFFER_NUM, 默认窗口 6 <= 12 仍成立)。
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 #
 # TLS 输入缓冲默认 16KB, 而本项目的下行报文都是短 JSON (会议纪要/指令),

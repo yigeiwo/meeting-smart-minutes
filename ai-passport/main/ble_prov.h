@@ -36,6 +36,17 @@ bool ble_prov_is_wifi_connected(void);
 bool ble_prov_owns_wifi(void);
 
 /**
+ * @brief 配网完成后释放 BLE 协议栈, 把内存让给 wss/TLS 桥接
+ *
+ * 蓝牙只服务于配网。ESP32-C3 无 PSRAM, 一次 wss(TLS) 握手需要约 20KB,
+ * 而配网完成后继续占着 NimBLE 会让握手因内存不足失败。本函数只是把释放请求
+ * 排入配网任务(实际释放会延后几秒, 以便"配网成功"的 BLE 通知先送达手机)。
+ *
+ * ⚠ 释放后 BLE 广播停止: 需要重新配网时必须重启胸卡(开机重新起广播)。
+ */
+void ble_prov_release_ble(void);
+
+/**
  * @brief 获取当前配网与网络状态
  */
 ble_prov_state_t ble_prov_get_state(void);
