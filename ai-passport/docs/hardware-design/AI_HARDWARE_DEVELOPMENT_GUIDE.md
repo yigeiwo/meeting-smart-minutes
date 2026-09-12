@@ -119,10 +119,12 @@ GPIO0 has an external 10 kΩ pull-up to 3.3 V. UP, DOWN, and OK connect it to gr
 
 | State | Nominal voltage | Current window |
 | --- | ---: | ---: |
-| UP | about 0 mV | `[0, 150)` mV |
-| DOWN | about 300 mV | `[150, 447)` mV |
-| OK | about 595 mV | `[447, 1900)` mV |
+| UP | about 0 mV | `[0, 140]` mV |
+| DOWN | about 300 mV | `[180, 430]` mV |
+| OK | about 595 mV | `[460, 1200]` mV |
 | Released | about 3300 mV | outside all windows |
+
+The windows above are **closed intervals**: the button component tests `vol <= max && vol >= min`. UP is a 0 Ω path to ground and reads about 0 mV, so the UP lower bound must stay 0. Raising it to 20 or 40 to dodge noise has twice produced the regression where UP stops responding entirely while DOWN and OK keep working; do not reintroduce that dead zone.
 
 Do not replace the external resistor with the inaccurate internal pull-up. The BSP creates one ADC1 oneshot unit and shares it with all button devices and voltage reads. Attenuation is `ADC_ATTEN_DB_12`. Callbacks originate in the button component task and must not block or perform heavy UI work.
 
