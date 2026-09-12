@@ -43,6 +43,14 @@
         .status-loading { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; display: block; }
         .status-success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; display: block; }
         .status-error { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; display: block; }
+        /* 原始异常名与 message: 排查手机侧蓝牙问题时需要原文, 不要只看翻译后的结论 */
+        .status-box { text-align: left; }
+        .err-raw { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #FECACA; font-size: 12px; color: #7F1D1D; word-break: break-all; }
+        .err-raw code { background: #FEE2E2; padding: 2px 5px; border-radius: 4px; font-family: monospace; }
+        /* 打开页面就先做一次环境自检: 手机浏览器不支持时不必等到点按钮才知道 */
+        .env-box { margin-top: 14px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.6; display: none; }
+        .env-ok { background: #F0FDF4; color: #166534; border: 1px solid #BBF7D0; display: block; }
+        .env-bad { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; display: block; }
 
         .nfc-tip { background: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 16px; padding: 16px; margin-top: 10px; font-size: 13px; color: #475569; }
         .nfc-tip h4 { font-size: 14px; font-weight: 700; color: #1E293B; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
@@ -111,6 +119,7 @@
                 <span>🔍 蓝牙连接胸卡并同步 Wi-Fi</span>
             </button>
 
+            <div id="bleEnvBox" class="env-box"></div>
             <div id="statusBox" class="status-box"></div>
         </div>
 
@@ -169,12 +178,85 @@
         const BLE_SERVICE_UUID = 0xFFF0;
         const CHAR_WRITE_UUID  = 0xFFF1;
         const CHAR_NOTIFY_UUID = 0xFFF2;
+        const DEVICE_NAME      = 'FoloPassport';
 
         function showStatus(msg, type) {
             const box = document.getElementById('statusBox');
             box.className = 'status-box status-' + type;
             box.innerHTML = msg;
             box.style.display = 'block';
+        }
+
+        // 每行更详细的原始错误, 便于把手机上的真实原因带回来
+        function rawError(err) {
+            const n = (err && err.name) ? err.name : 'UnknownError';
+            const m = (err && err.message) ? err.message : '(无 message)';
+            return '<div class="err-raw">原始错误：<code>' + n + ': ' + m + '</code></div>';
+        }
+
+        // 运行环境预检: 先把"手机/浏览器根本不支持"和"支持但没搜到胸卡"分开,
+        // 否则两者都会落到 NotFoundError, 页面只能报一句含糊的"已取消", 无法排查。
+        function detectBleEnv() {
+            const ua = navigator.userAgent || '';
+            const inApp = /MicroMessenger|Weixin|Lark|Feishu|DingTalk|QQ\/|Weibo|AlipayClient|UCBrowser|Quark|baiduboxapp|baidubrowser/i.test(ua);
+            const isIOS = /iPhone|iPad|iPod/i.test(ua) ||
+                          (/Macintosh/.test(ua) && 'ontouchend' in document);
+
+            if (!window.isSecureContext) {
+                return { ok: false, msg: '⚠️ 本页不在安全上下文里（必须是 <code>https://</code> 或 localhost）。' +
+                       '浏览器在 http:// 页面下会直接禁用 Web Bluetooth，请改用 https 地址打开本页。' };
+            }
+            if (!navigator.bluetooth) {
+                if (isIOS) {
+                    return { ok: false, msg: '⚠️ iPhone 的 Safari 没有 Web Bluetooth 接口，无法调用蓝牙。<br>' +
+                           '<b>请安装免费的 Bluefy 浏览器</b>，用 Bluefy 打开本页后再点下面的按钮。' };
+                }
+                if (inApp) {
+                    return { ok: false, msg: '⚠️ 检测到你在<b>微信/飞书/QQ 等 App 的内嵌浏览器</b>里，' +
+                           '内嵌浏览器不开放 Web Bluetooth。<br>请点右上角「⋯ / 在浏览器打开」，改用系统 <b>Chrome / Edge</b>。' };
+                }
+                return { ok: false, msg: '⚠️ 当前浏览器未开放 Web Bluetooth 接口。<br>' +
+                       '安卓请用 <b>Chrome / Edge</b>；iPhone 请用免费的 <b>Bluefy</b> 浏览器。' };
+            }
+            if (inApp) {
+                return { ok: false, msg: '⚠️ 检测到内嵌浏览器（微信/飞书/QQ 等）。即使它能弹出设备列表，' +
+                       '连接也会被拦截。<br>请用系统 <b>Chrome / Edge</b> 打开本页。' };
+            }
+            return { ok: true };
+        }
+
+        // 把 Web Bluetooth 的真实异常翻译成可执行的结论
+        function diagnoseBleError(err) {
+            const name = (err && err.name) ? err.name : 'UnknownError';
+            const m = (((err && err.message) || '') + '').toLowerCase();
+
+            if (name === 'NotFoundError') {
+                if (m.indexOf('adapter') >= 0) {
+                    return '❌ <b>手机蓝牙没有打开</b>（浏览器报告：Bluetooth adapter not available）。<br>' +
+                           '请打开手机快捷面板里的蓝牙开关，并确认浏览器已获得「附近的设备」权限，然后重试。' + rawError(err);
+                }
+                if (m.indexOf('cancel') >= 0) {
+                    return 'ℹ️ 你在设备列表里点了取消。请重新点击按钮，在列表中选择 <code>' + DEVICE_NAME + '</code>。' + rawError(err);
+                }
+                return '❌ <b>没有搜到胸卡</b>（设备列表为空或没有 ' + DEVICE_NAME + '）。请逐项确认：<br>' +
+                       '① 胸卡已开机、屏幕亮着，且最近没有进过菜单里的<b>「蓝牙」示例页</b>（那一页会接管广播，配网服务会消失）；<br>' +
+                       '② 手机蓝牙已打开，手机与胸卡距离 1 米内，胸卡不要贴在其他无线设备上；<br>' +
+                       '③ 手机系统蓝牙设置里若有残留的 ' + DEVICE_NAME + ' 配对记录，先「忽略/删除此设备」；<br>' +
+                       '④ 胸卡若正被另一台手机连着，先在那台手机上断开。' + rawError(err);
+            }
+            if (name === 'SecurityError') {
+                return '❌ <b>浏览器拒绝了蓝牙权限</b>（SecurityError）。常见原因：<br>' +
+                       '① 在内嵌浏览器（微信/飞书/QQ）里打开 —— 请改用系统 Chrome/Edge；<br>' +
+                       '② 页面不是 https；<br>' +
+                       '③ 不是由直接点击触发的。' + rawError(err);
+            }
+            if (name === 'NotSupportedError') {
+                return '❌ 当前浏览器不支持 Web Bluetooth。安卓请用 Chrome/Edge，iPhone 请用 Bluefy。' + rawError(err);
+            }
+            if (name === 'NetworkError' || name === 'InvalidStateError') {
+                return '❌ 手机蓝牙适配器状态异常（' + name + '）。请关闭再打开手机蓝牙，或重启浏览器后重试。' + rawError(err);
+            }
+            return '❌ 蓝牙流程失败。' + rawError(err);
         }
 
         // 切换 wss / ws 时自动带出常用端口
@@ -204,17 +286,41 @@
                 return;
             }
 
-            if (!navigator.bluetooth) {
-                showStatus('⚠️ 提示: 当前手机浏览器未开放 Web Bluetooth 接口。<br><b>建议:</b> 安卓请使用 Chrome/Edge 浏览器；iPhone 请使用免费的 Bluefy 浏览器。', 'error');
+            // 1) 环境预检: 分清"浏览器/手机不支持"与"支持但没搜到胸卡"
+            const env = detectBleEnv();
+            if (!env.ok) {
+                showStatus(env.msg, 'error');
                 return;
+            }
+
+            // 2) 适配器可用性预检 (Chrome 87+)。手机蓝牙没开时 requestDevice 会立刻抛
+            //    NotFoundError: Bluetooth adapter not available —— 旧代码会把它误报成
+            //    "已取消蓝牙配对", 让人以为是自己点了取消, 实际原因完全不同。
+            if (navigator.bluetooth.getAvailability) {
+                let available = null;
+                try {
+                    available = await navigator.bluetooth.getAvailability();
+                } catch (e) {
+                    // 老浏览器不支持该接口, 继续走正常流程
+                }
+                if (available === false) {
+                    showStatus('❌ <b>手机蓝牙未开启</b>（浏览器 getAvailability 返回 false）。<br>' +
+                               '请打开手机蓝牙开关后重试。', 'error');
+                    return;
+                }
             }
 
             try {
                 btn.disabled = true;
-                showStatus('正在搜索胸卡蓝牙 (FoloPassport)...<br>请在弹出的蓝牙列表中选择设备', 'loading');
+                showStatus('正在搜索胸卡蓝牙 (' + DEVICE_NAME + ')...<br>请在弹出的蓝牙列表中选择设备', 'loading');
 
+                // 名字与服务 UUID 两个条件取【或】: 只要广播里带 0xFFF0 配网服务就能被列出,
+                // 即使广播名有细微差异也不会整台胸卡都看不到。
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'FoloPassport' }],
+                    filters: [
+                        { services: [BLE_SERVICE_UUID] },
+                        { namePrefix: DEVICE_NAME }
+                    ],
                     optionalServices: [BLE_SERVICE_UUID]
                 });
 
@@ -222,7 +328,19 @@
                 const server = await device.gatt.connect();
 
                 showStatus('正在获取配网服务...', 'loading');
-                const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                let service;
+                try {
+                    service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                } catch (e) {
+                    // 连上了却拿不到配网服务: 典型情况是胸卡停在菜单的「蓝牙」示例页 ——
+                    // 那一页用同名设备广播, 但只提供示例服务, 没有 0xFFF0。
+                    showStatus('❌ 已连上蓝牙，但胸卡没有提供配网服务 (0xFFF0)。<br>' +
+                               '胸卡可能正停在菜单里的「蓝牙」示例页：请在胸卡上长按上键回到主功能菜单后重试；' +
+                               '若仍拿不到服务，请把胸卡关机再开机（重启后配网广播一定在运行）。' +
+                               rawError(e), 'error');
+                    btn.disabled = false;
+                    return;
+                }
 
                 const writeChar = await service.getCharacteristic(CHAR_WRITE_UUID);
                 const notifyChar = await service.getCharacteristic(CHAR_NOTIFY_UUID);
@@ -263,13 +381,24 @@
             } catch (err) {
                 console.error(err);
                 btn.disabled = false;
-                if (err.name === 'NotFoundError') {
-                    showStatus('已取消蓝牙配对', 'error');
-                } else {
-                    showStatus('蓝牙通信异常: ' + err.message, 'error');
-                }
+                // 不再统一报"已取消": 按真实异常给出可执行的结论, 并附原始错误便于复现
+                showStatus(diagnoseBleError(err), 'error');
             }
         }
+
+        // 打开页面就自检一次: 手机浏览器不支持时, 不必等到点按钮才发现
+        (function renderBleEnv() {
+            const box = document.getElementById('bleEnvBox');
+            if (!box) return;
+            const env = detectBleEnv();
+            if (env.ok) {
+                box.className = 'env-box env-ok';
+                box.innerHTML = '✅ 环境自检通过：当前浏览器支持 Web Bluetooth，点下面的按钮即可连接胸卡。';
+            } else {
+                box.className = 'env-box env-bad';
+                box.innerHTML = '环境自检未通过：' + env.msg;
+            }
+        })();
     </script>
 </body>
 </html>
