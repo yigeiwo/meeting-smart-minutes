@@ -240,16 +240,23 @@ class FeishuClient:
 
         # If no Feishu App credentials configured, provide local doc generation
         if not self.app_id or not self.app_secret:
-            logger.info("未配置飞书应用凭证，生成本地飞书标准纪要文档")
             out_dir = Path("records")
             out_dir.mkdir(exist_ok=True)
             doc_file = out_dir / f"{doc_title}.md"
-            
+
             from .ai_summarizer import AISummarizer
             md_content = AISummarizer().format_to_markdown(summary_data)
             with open(doc_file, "w", encoding="utf-8") as f:
                 f.write(md_content)
-            return f"https://feishu.cn/docx/local_preview_{int(time.time())}"
+            # ⚠ 这里以前返回 "https://feishu.cn/docx/local_preview_<ts>" —— 那是一个点不到
+            # 任何内容的假飞书链接, 会让人误以为云文档已生成。纪要并没有"链接", 只有一个
+            # 本地 md 文件, 因此如实返回空串, 并把真实文件路径写进日志与返回值说明中,
+            # 由调用方按"无云文档链接"处理(工作台与胸卡都会显示为未生成链接)。
+            logger.warning(
+                "未配置飞书应用凭证: 未能生成飞书云文档, 纪要已保存为本地文件 %s "
+                "(如需真实云文档链接, 请配置 FEISHU_APP_ID / FEISHU_APP_SECRET)",
+                doc_file.as_posix())
+            return ""
 
         folder = folder_token or self.doc_folder_token
         headers = self._get_headers()
