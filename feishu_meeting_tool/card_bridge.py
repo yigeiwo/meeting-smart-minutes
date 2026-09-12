@@ -219,6 +219,12 @@ class CardBridge:
         self.card_channels = 1
         self.card_sample_width = 2
 
+        # ================= 🖼️ 屏幕帧渲染缓存 =================
+        # 工作台每 2 秒轮询一次 /api/card/status, 每次都会重渲染整张 240x320 位图并 base64
+        # (约 100KB)。界面关键输入没变时直接复用上次的帧, 把服务端 CPU 与下行带宽降下来。
+        self._frame_sig: Optional[tuple] = None
+        self._frame_b64_cached: str = ""
+
     # ================= 🎙️ 卡片真实音频落盘 =================
 
     def _open_card_wav_locked(self) -> None:
@@ -517,6 +523,10 @@ class CardBridge:
             "mode_id": self.current_mode,
             "state": self.state,
         })
+        # 切回会议模式且已有纪要时, 把纪要结构化数据重新下发给硬件胸卡:
+        # 位图帧对硬件是跳过的, 若不重发 summary, 卡片拿不到数据就渲染不出上次的纪要。
+        if mode_id == "meeting" and self.current_summary:
+            self.broadcast(build_summary_event(self.current_summary, event_name="summary"))
 
     # ================= 🎵 蓝牙音频播放控制方法 =================
 
@@ -1209,12 +1219,15 @@ class CardBridge:
     def broadcast(self, data: Dict[str, Any]):
         payload = json.dumps(data, separators=(",", ":")) + "\n"
         encoded = payload.encode("utf-8")
-        is_lcd_frame = data.get("type") == "lcd_frame"
+        # 只要帧里带整张 base64 位图(无论 type 叫 lcd_frame 还是别的 state_changed 之类),
+        # 对真实硬件一律跳过: 胸卡自己渲染 LVGL 界面, 位图帧只会挤占它的 Wi-Fi 上行带宽
+        # (音频推流 16k/16bit 单声道约 32KB/s, 一张位图 100KB 就会顶掉 3 秒音频)。
+        is_big_frame = "frame_b64" in data or data.get("type") == "lcd_frame"
         with self._lock:
             dead_clients = []
             for client in self.clients:
-                # 真实硬件胸卡不需要位图帧 (它自己渲染 LVGL 界面), 跳过以免占用其上行带宽
-                if is_lcd_frame and client in self.hw_clients:
+                # 真实硬件胸卡不需要位图帧, 跳过以免占用其上行带宽
+                if is_big_frame and client in self.hw_clients:
                     continue
                 try:
                     client.sendall(encoded)
@@ -1246,7 +1259,23 @@ class CardBridge:
         else:
             duration = self.record_duration
 
-        frame = self._generate_lcd_frame()
+        # 渲染缓存: 界面渲染依赖的关键输入没变时, 直接复用上次的 base64 帧。
+        # 工作台每 2 秒轮询一次本接口, 缓存命中后不再走 PIL 重绘 + PNG 编码 + base64
+        # (实测单帧渲染 0.018 秒 + 约 100KB 帧体, 静止界面下纯属浪费)。
+        sig = (self.state, self.current_mode, self.menu_selected_index, self.battery_soc,
+               duration, self.bt_is_playing, self.bt_volume,
+               self.bt_track_index % len(self.bt_playlist), self.bt_playback_seconds,
+               self.nfc_selected_index, self.nfc_swiping,
+               self.pomo_is_running, self.pomo_remaining_seconds, self.memos_count,
+               self.todo_selected_index, self.current_todo_index,
+               tuple(t.get("done") for t in self.daily_todos),
+               len(self.clients))
+        if sig == self._frame_sig:
+            frame_b64 = self._frame_b64_cached
+        else:
+            frame_b64 = self._generate_lcd_frame().get("frame_b64", "")
+            self._frame_b64_cached = frame_b64
+            self._frame_sig = sig
 
         return {
             "state": self.state,
@@ -1266,7 +1295,7 @@ class CardBridge:
             "record_duration": duration,
             "current_summary": self.current_summary,
             "current_todo_index": self.current_todo_index,
-            "frame_b64": frame.get("frame_b64", ""),
+            "frame_b64": frame_b64,
             # 硬件卡片真实音频上行统计 (工作台前端可直接展示链路是否真的在传音频)
             "card_audio": self.get_card_audio_stats(),
         }

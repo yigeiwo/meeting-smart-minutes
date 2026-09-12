@@ -67,6 +67,16 @@ static uint32_t s_processing_seconds = 0;
 // 最近一次真实失败原因 (来自工作台如实回传), 空串表示无
 static char s_err_note[CARD_LINK_ERR_LEN] = {0};
 
+// 提炼已提交、尚未收到工作台结果 (录音结束后置位; 收到纪要/失败/超时后清除)。
+// 用于"切到别的模式再回来"时区分: 提炼进行中显示 PROCESSING, 已完成显示纪要。
+static bool s_pending_summary = false;
+
+// 全局提醒横幅: 叠加在当前活跃屏幕上, 3 秒自动消失 (跨模式提示"纪要已生成")
+static lv_obj_t   *s_notify = NULL;
+static lv_timer_t *s_notify_timer = NULL;
+
+static void meeting_show_notify(const char *msg);
+
 // 测量一段 UTF-8 文本使用中文字体时的单行像素宽。
 // LVGL 9 移除了 lv_txt_get_width, 统一用 lv_text_get_size (返回像素尺寸)。
 static lv_coord_t text_width_px(const char *s)
@@ -373,6 +383,62 @@ static void show_page(int page_idx) {
     update_ui();
 }
 
+// ---- 全局提醒横幅 (跨模式): 3 秒自动消失, 绝不残留 ----
+static void notify_delete_cb(lv_event_t *e)
+{
+    // 横幅对象被删除时 (超时删除或所在屏幕被销毁) 自动清指针, 杜绝悬空引用
+    lv_obj_t *obj = lv_event_get_target(e);
+    if (obj == s_notify) s_notify = NULL;
+}
+
+static void notify_timeout_cb(lv_timer_t *t)
+{
+    (void)t;
+    lv_timer_delete(s_notify_timer);
+    s_notify_timer = NULL;
+    if (s_notify) {
+        lv_obj_delete(s_notify);   // 触发 DELETE 回调, s_notify 会被置 NULL
+        s_notify = NULL;
+    }
+}
+
+static void meeting_show_notify(const char *msg)
+{
+    if (!msg || !msg[0]) return;
+    if (!bsp_lvgl_lock(500)) return;
+
+    if (s_notify) {                 // 上一轮横幅还在: 先移除再重建
+        lv_obj_delete(s_notify);
+        s_notify = NULL;
+    }
+    if (s_notify_timer) {
+        lv_timer_delete(s_notify_timer);
+        s_notify_timer = NULL;
+    }
+
+    s_notify = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_notify);
+    lv_obj_set_size(s_notify, 220, 36);
+    lv_obj_set_style_bg_color(s_notify, lv_color_hex(0x1E3A8A), 0);
+    lv_obj_set_style_bg_opa(s_notify, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_notify, 8, 0);
+    lv_obj_set_style_border_color(s_notify, lv_color_hex(0x60A5FA), 0);
+    lv_obj_set_style_border_width(s_notify, 2, 0);
+    lv_obj_set_style_shadow_width(s_notify, 14, 0);
+    lv_obj_set_style_shadow_color(s_notify, lv_color_hex(0x1E3A8A), 0);
+    lv_obj_align(s_notify, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_add_event_cb(s_notify, notify_delete_cb, LV_EVENT_DELETE, NULL);
+
+    lv_obj_t *lb = lv_label_create(s_notify);
+    lv_obj_set_style_text_font(lb, &font_chinese_14, 0);
+    lv_obj_set_style_text_color(lb, lv_color_hex(0xFFFFFF), 0);
+    lv_label_set_text(lb, msg);
+    lv_obj_center(lb);
+
+    s_notify_timer = lv_timer_create(notify_timeout_cb, 3000, NULL);
+    bsp_lvgl_unlock();
+}
+
 static void on_tick_timer(lv_timer_t *timer) {
     (void)timer;
 
@@ -385,6 +451,7 @@ static void on_tick_timer(lv_timer_t *timer) {
             }
         } else if (s_processing_seconds >= PROCESSING_TIMEOUT_SEC) {
             snprintf(s_err_note, sizeof(s_err_note), "%s", "工作台未在 180 秒内返回结果");
+            s_pending_summary = false;   // 超时视为本次提炼无果, 不再标记"进行中"
         }
     }
 
@@ -609,10 +676,22 @@ void demo_meeting_enter(void) {
     // 订阅 5566 桥接链路事件: 真实纪要到达 / 工作台回传失败 / 反向指令
     card_link_set_event_cb(on_card_link_event, NULL);
 
-    s_state = MEETING_IDLE;
     s_rec_seconds = 0;
     s_processing_seconds = 0;
     s_err_note[0] = '\0';
+
+    // 恢复进入会议模式时的真实状态 (全部来自本地真实缓存, 绝不伪造):
+    //   - 提炼已提交但尚未出结果 -> 继续显示"提炼中"
+    //   - 已有工作台真实回推的纪要 -> 直接展示上次纪要 (切到别的模式再回来, 纪要不丢)
+    //   - 否则 -> 会议待命
+    card_link_summary_t sum;
+    if (s_pending_summary) {
+        s_state = MEETING_PROCESSING;
+    } else if (card_link_get_summary(&sum)) {
+        s_state = MEETING_COMPLETED;
+    } else {
+        s_state = MEETING_IDLE;
+    }
 
     // 默认显示第 1 页
     show_page(0);
@@ -628,6 +707,7 @@ static void meeting_toggle_record(void)
         // 结束录音: 通知工作台停录, 进入"真实等待提炼结果"状态
         s_state = MEETING_PROCESSING;
         s_processing_seconds = 0;
+        s_pending_summary = true;   // 提炼已提交: 切走再回来时继续显示"提炼中"
         card_link_send_record_stop();
         ESP_LOGI(TAG, "结束录音, 已通知工作台 record_stop, 等待真实提炼结果");
     } else if (s_state == MEETING_IDLE || s_state == MEETING_COMPLETED ||
@@ -655,14 +735,19 @@ static void on_card_link_event(card_link_event_t ev, void *user)
     switch (ev) {
     case CARD_LINK_EV_SUMMARY:
         // 收到工作台真实纪要: 提炼完成, 界面按真实数据渲染
+        s_pending_summary = false;
         s_err_note[0] = '\0';
-        if (s_state != MEETING_RECORDING) {
-            s_state = MEETING_COMPLETED;
+        if (s_state == MEETING_RECORDING) {
+            break;   // 录音中不打断 (正常链路不会发生, 防御性跳过)
         }
+        s_state = MEETING_COMPLETED;
+        // 无论卡片当前在会议页还是别的模式, 都弹"纪要已生成"提醒, 用户可稍后查看
+        meeting_show_notify("会议纪要已生成");
         break;
 
     case CARD_LINK_EV_PIPELINE_FAILED: {
         // 工作台如实回传失败: 展示真实原因, 不伪造成功
+        s_pending_summary = false;
         const char *e = card_link_last_error();
         snprintf(s_err_note, sizeof(s_err_note), "%s", (e && e[0]) ? e : "工作台未返回失败原因");
         if (s_state != MEETING_RECORDING) {
@@ -696,12 +781,22 @@ void demo_meeting_exit(void) {
         lv_timer_delete(s_tick_timer);
         s_tick_timer = NULL;
     }
+    // 提醒横幅/timer 一并清理 (横幅若挂在别的模式屏幕上, 由 DELETE 回调自行清指针)
+    if (s_notify_timer) {
+        lv_timer_delete(s_notify_timer);
+        s_notify_timer = NULL;
+    }
+    if (s_notify) {
+        lv_obj_delete(s_notify);   // 触发 DELETE 回调, s_notify 会被置 NULL
+        s_notify = NULL;
+    }
     // 采集任务在 s_state 离开 MEETING_RECORDING 后会自行退出并回收自身
     // (vTaskDelete(NULL))，此处严禁再对可能已失效的句柄调用 vTaskDelete，否则崩溃。
     s_state = MEETING_IDLE;
     s_rec_task = NULL;
     s_processing_seconds = 0;
     s_err_note[0] = '\0';
+    // 注意: s_pending_summary 保留不清 —— 提炼提交后切走再回来, 应继续显示"提炼中"
 
     if (s_scr) {
         lv_obj_delete(s_scr);
