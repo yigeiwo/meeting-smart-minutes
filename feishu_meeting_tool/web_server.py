@@ -38,28 +38,84 @@ class WsTransport:
 
     这样 CardBridge 里既有的广播与状态机逻辑可以原样复用，无需区分
     "裸 TCP 5566 客户端" 与 "wss:///ws/card 客户端"。
+
+    ⚠ 发送必须是非阻塞投递, 不能在这里等结果。
+    历史事故: 原来的实现是
+        fut = asyncio.run_coroutine_threadsafe(ws.send_text(text), loop)
+        fut.result(timeout=10)
+    而 broadcast 经常是从【事件循环线程】里被调用的 —— /api/card/event 是 async 端点,
+    它同步调用 CardBridge.trigger_event -> broadcast。此时 run_coroutine_threadsafe
+    把发送协程排进同一个循环, 而 .result() 又把该循环堵住, 于是协程永远排不上:
+    自锁满 10 秒 -> TimeoutError -> 该通道被判为死连接并 close()。
+    现场表现就是"工作台每点一次按钮/发一次指令, 胸卡就掉一次线"(同时 Web 界面卡 10 秒),
+    卡片刻录时的音频也随之中断。实测取证:
+        胸卡 WS 发送失败: 53 字节, 耗时 10.00 秒, 报文类型=record_start, 异常=TimeoutError()
+    现在改为: 用 call_soon_threadsafe + asyncio.Queue 交给循环里的独立发送任务,
+    调用方立即返回(与裸 socket 的写缓冲语义一致), 顺序仍然保持 FIFO。
     """
+
+    # 待发队列上限: 服务端发给胸卡的只有指令与纪要, 正常远小于此;
+    # 真堆积到这个量说明对端不读了, 如实丢弃并告警, 不静默堆积内存。
+    QUEUE_MAX = 512
 
     def __init__(self, ws, loop):
         self._ws = ws
         self._loop = loop
         self._closed = False
+        self._q: "asyncio.Queue" = asyncio.Queue()
+        self._task = None
+        try:
+            # 在循环线程里创建(本对象由 /ws/card 处理器创建), 因此可直接 create_task
+            self._task = loop.create_task(self._drain())
+        except Exception as e:  # pragma: no cover
+            logger.warning("胸卡 WS 发送任务创建失败: %r", e)
+
+    async def _drain(self):
+        try:
+            while True:
+                text = await self._q.get()
+                if text is None:
+                    break
+                await self._ws.send_text(text)
+        except Exception as e:
+            # 对端不读了/已关闭: 标记为关闭, 由 CardBridge 在下次广播时剔除
+            logger.info("胸卡 WS 发送任务结束: %r", e)
+            self._closed = True
+
+    def _enqueue(self, text: str):
+        if self._closed:
+            return
+        if self._q.qsize() >= self.QUEUE_MAX:
+            logger.warning("胸卡 WS 待发队列已满(%d), 丢弃 1 帧", self._q.qsize())
+            return
+        self._q.put_nowait(text)
 
     def sendall(self, data: bytes):
         if self._closed:
             raise ConnectionError("websocket 已关闭")
-        # NDJSON 本身是 UTF-8 文本行，用文本帧发送
+        # NDJSON 本身是 UTF-8 文本行，用文本帧发送。
+        # call_soon_threadsafe 从任意线程调用都不会阻塞, 因此不会自锁事件循环。
         text = data.decode("utf-8", "replace")
-        # 真实等待发送结果: 失败会抛异常, 由 CardBridge 判定为死连接并剔除
-        fut = asyncio.run_coroutine_threadsafe(self._ws.send_text(text), self._loop)
-        fut.result(timeout=10)
+        self._loop.call_soon_threadsafe(self._enqueue, text)
 
     def close(self):
         if self._closed:
             return
         self._closed = True
+
+        def _closer():
+            try:
+                if self._task is not None:
+                    self._task.cancel()
+            except Exception:
+                pass
+            try:
+                asyncio.get_running_loop().create_task(self._ws.close())
+            except Exception:
+                pass
+
         try:
-            asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
+            self._loop.call_soon_threadsafe(_closer)
         except Exception:
             pass
 
@@ -463,7 +519,7 @@ async def summarize_meeting(
             logger.warning(f"多机器人互推广播异常: {e}")
 
     try:
-        get_card_bridge().push_meeting_summary_to_card(summary_data)
+        await asyncio.to_thread(get_card_bridge().push_meeting_summary_to_card, summary_data)
     except Exception as e:
         logger.warning(f"同步至卡片失败: {e}")
 
@@ -519,7 +575,7 @@ async def summarize_minutes(request: Request, req: MinutesRequest):
     summary_data = summarizer.summarize(transcript, scenario=req.scenario)
 
     try:
-        get_card_bridge().push_meeting_summary_to_card(summary_data)
+        await asyncio.to_thread(get_card_bridge().push_meeting_summary_to_card, summary_data)
     except Exception:
         pass
 
@@ -651,23 +707,30 @@ async def sync_bitable(request: Request, summary_data: dict):
 
 @app.get("/api/card/status")
 async def get_card_status():
-    return {"code": 0, "data": get_card_bridge().get_screen_state()}
+    # get_screen_state() 会同步渲染 240x320 屏幕位图(PIL 绘制 + base64), 是重活;
+    # 工作台约每 2 秒轮询一次本接口, 若直接在事件循环里跑会把整个服务卡住
+    # (实测单次约 5 秒, 期间胸卡的 WebSocket 收发与其它请求全部被延迟)。
+    # 因此统一放到线程里执行, 保持事件循环可用。
+    state = await asyncio.to_thread(get_card_bridge().get_screen_state)
+    return {"code": 0, "data": state}
 
 
 @app.post("/api/card/event")
 async def trigger_card_event(body: dict):
     event_name = body.get("event", "")
-    return get_card_bridge().trigger_event(event_name)
+    # trigger_event 同理会同步渲染并广播屏幕帧, 不能占用事件循环
+    return await asyncio.to_thread(get_card_bridge().trigger_event, event_name)
 
 
 @app.post("/api/card/mode")
 async def set_card_mode(body: dict):
     mode_id = body.get("mode_id", "meeting")
     if mode_id == "menu":
-        get_card_bridge().enter_menu()
+        await asyncio.to_thread(get_card_bridge().enter_menu)
     else:
-        get_card_bridge().enter_mode(mode_id)
-    return {"code": 0, "msg": f"卡片已切换至模式: {mode_id}", "data": get_card_bridge().get_screen_state()}
+        await asyncio.to_thread(get_card_bridge().enter_mode, mode_id)
+    state = await asyncio.to_thread(get_card_bridge().get_screen_state)
+    return {"code": 0, "msg": f"卡片已切换至模式: {mode_id}", "data": state}
 
 
 @app.get("/api/firmware/download")
@@ -789,13 +852,14 @@ async def set_audio_volume_api(body: dict):
 async def speak_summary_audio_api(body: dict):
     title = body.get("title")
     cb = get_card_bridge()
-    cb.speak_summary_tts(title)
-    return {"code": 0, "msg": "已通过蓝牙/卡片扬声器开始语音播报会议纪要", "data": cb.get_screen_state()}
+    await asyncio.to_thread(cb.speak_summary_tts, title)
+    state = await asyncio.to_thread(cb.get_screen_state)
+    return {"code": 0, "msg": "已通过蓝牙/卡片扬声器开始语音播报会议纪要", "data": state}
 
 
 @app.post("/api/card/push")
 async def push_to_card(summary_data: dict):
-    get_card_bridge().push_meeting_summary_to_card(summary_data)
+    await asyncio.to_thread(get_card_bridge().push_meeting_summary_to_card, summary_data)
     return {"code": 0, "msg": "已向所有连接的 AI Passport 卡片/模拟器广播纪要数据"}
 
 
@@ -1260,3 +1324,4 @@ async def websocket_card_link(websocket: WebSocket):
         inbox.put(None)
         worker.join(timeout=3)
         card_bridge.remove_transport(transport)
+        logger.info("硬件胸卡 WS 通道已清理 (当前通道数=%d)", len(card_bridge.clients))

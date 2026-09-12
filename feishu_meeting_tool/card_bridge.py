@@ -22,13 +22,29 @@ for f in ["msyh.ttc", "simhei.ttf", "simsun.ttc", "arial.ttf"]:
         break
 
 
+_FONT_CACHE = {}
+
+
 def get_font(size: int = 14) -> ImageFont.FreeTypeFont:
+    """按字号缓存字体对象。
+
+    ⚠ 必须缓存。ImageFont.truetype 每次调用都会重新从磁盘读取整个中文字体文件
+    (十几 MB), 而渲染一帧 240x320 画面要按多个字号取字体多次 —— 实测单帧耗时
+    5 秒以上。工作台每 2 秒轮询一次 /api/card/status(它会渲染一帧), 于是事件循环
+    被反复堵死: 界面操作要等 5 秒以上, 胸卡的 WebSocket 收发也被拖慢甚至超时。
+    缓存后同一字号的字体对象只加载一次, 单帧耗时降到毫秒级。
+    """
+    font = _FONT_CACHE.get(size)
+    if font is not None:
+        return font
+    font = ImageFont.load_default()
     if FONT_PATH:
         try:
-            return ImageFont.truetype(FONT_PATH, size)
+            font = ImageFont.truetype(FONT_PATH, size)
         except Exception:
             pass
-    return ImageFont.load_default()
+    _FONT_CACHE[size] = font
+    return font
 
 
 def build_summary_event(summary_data: Dict[str, Any], event_name: str = "summary") -> Dict[str, Any]:
@@ -1202,7 +1218,10 @@ class CardBridge:
                     continue
                 try:
                     client.sendall(encoded)
-                except Exception:
+                except Exception as e:
+                    # 取证: 到底是谁把通道判死的、当时在发什么报文
+                    logger.warning("向通道广播失败, 将被剔除: 报文类型=%s 异常=%r",
+                                   data.get("type") or data.get("event") or "?", e)
                     dead_clients.append(client)
             for dc in dead_clients:
                 if dc in self.clients:
