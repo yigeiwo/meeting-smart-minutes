@@ -25,14 +25,14 @@ static const char *TAG = "main";
 extern const lv_font_t font_chinese_14;
 
 static const demo_entry_t DEMOS[] = {
-    { "飞书会议", demo_meeting_enter, demo_meeting_exit, demo_meeting_key },
-    { "按键测试", demo_button_enter,  demo_button_exit,  demo_button_key  },
-    { "显示测试", demo_display_enter, demo_display_exit, demo_display_key },
-    { "音频测试", demo_audio_enter,   demo_audio_exit,   demo_audio_key   },
-    { "电池电量", demo_battery_enter, demo_battery_exit, demo_battery_key },
-    { "无线网络", demo_wifi_enter,    demo_wifi_exit,    demo_wifi_key    },
-    { "蓝牙广播", demo_ble_enter,     demo_ble_exit,     demo_ble_key     },
-    { "低功耗",   demo_low_power_enter, demo_low_power_exit, demo_low_power_key },
+    { "飞书会议", "meeting", demo_meeting_enter, demo_meeting_exit, demo_meeting_key },
+    { "按键测试", NULL, demo_button_enter,  demo_button_exit,  demo_button_key  },
+    { "显示测试", NULL, demo_display_enter, demo_display_exit, demo_display_key },
+    { "音频测试", NULL, demo_audio_enter,   demo_audio_exit,   demo_audio_key   },
+    { "电池电量", NULL, demo_battery_enter, demo_battery_exit, demo_battery_key },
+    { "无线网络", NULL, demo_wifi_enter,    demo_wifi_exit,    demo_wifi_key    },
+    { "蓝牙广播", NULL, demo_ble_enter,     demo_ble_exit,     demo_ble_key     },
+    { "低功耗",   NULL, demo_low_power_enter, demo_low_power_exit, demo_low_power_key },
 };
 #define DEMO_COUNT (sizeof(DEMOS) / sizeof(DEMOS[0]))
 
@@ -89,6 +89,14 @@ static void enter_menu(void) {
     menu_build();
 }
 
+// 进入某功能演示页前, 把模式 id 真实通知工作台。
+// 工作台据此切换为对应模式; 对 meeting 会重发纪要数据, 卡片才能恢复上次纪要。
+static void notify_mode_entry(int idx) {
+    if (idx >= 0 && idx < DEMO_COUNT && DEMOS[idx].mode_id) {
+        card_link_send_select_mode(DEMOS[idx].mode_id);
+    }
+}
+
 // 按键回调运行在 button 组件的任务里,操作 LVGL 必须加锁。
 static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
     (void)user;
@@ -130,6 +138,7 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
                 lv_obj_delete(s_menu_scr);
                 s_menu_scr = NULL;
                 s_mascot = NULL;
+                notify_mode_entry(s_active);
                 DEMOS[s_active].enter();
             } else if (btn == BSP_BTN_UP || btn == BSP_BTN_DOWN) {
                 ui_pixel_mascot_jump(s_mascot);
@@ -140,6 +149,7 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
             lv_obj_delete(s_menu_scr);
             s_menu_scr = NULL;
             s_mascot = NULL;
+            notify_mode_entry(s_active);
             DEMOS[s_active].enter();
         }
     }
@@ -179,6 +189,7 @@ void app_main(void) {
     if (bsp_lvgl_lock(1000)) { 
         // 默认直接开机进入飞书会议智能页面
         s_active = 0;
+        notify_mode_entry(s_active);
         DEMOS[s_active].enter();
         bsp_lvgl_unlock(); 
     }

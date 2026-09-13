@@ -145,6 +145,12 @@ void card_link_send_combo_menu(void)
     tx_json_simple("{\"type\":\"combo_menu\"}");
 }
 
+void card_link_send_select_mode(const char *mode_id)
+{
+    if (!mode_id || !mode_id[0]) return;
+    tx_json_simple("{\"type\":\"select_mode\",\"mode_id\":\"%s\"}", mode_id);
+}
+
 // 真实音频上行: 1024B PCM -> base64 -> 单行 NDJSON
 static char s_audio_json[LINK_AUDIO_JSON];
 

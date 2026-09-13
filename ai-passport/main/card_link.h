@@ -8,6 +8,7 @@
 //     {"type":"battery","soc":85}
 //     {"type":"record_start"} / {"type":"record_stop"}  录音启停 (工作台据此落盘 wav 并跑 AI 提炼)
 //     {"type":"combo_menu"}                            长按上键返回菜单
+//     {"type":"select_mode","mode_id":"meeting"}       进入某功能模式 (工作台据此切模式/重发纪要)
 //     {"type":"audio","seq":N,"pcm":"<base64 16k/16bit/单声道>"}   真实录音音频上行
 //
 //   注: 卡片不发送 {"type":"button"} 原始按键消息 —— 工作台的按键处理已内含录音启停逻辑,
@@ -89,6 +90,7 @@ void card_link_send_battery(int soc);
 void card_link_send_record_start(void);
 void card_link_send_record_stop(void);
 void card_link_send_combo_menu(void);
+void card_link_send_select_mode(const char *mode_id);
 
 /** 上行: 真实音频 (PCM 16bit 单声道)。
  *  返回 false 表示链路未就绪或发送缓冲已满，该帧被真实丢弃并计入 drops。 */
