@@ -329,33 +329,59 @@ static void update_ui(void) {
                 lv_color_hex(card_link_is_connected() ? 0x16A34A : 0x94A3B8), 0);
         }
     } else if (s_cur_page == 2) {
-        // --- 第 3 页更新 (工作台真实回推的待办清单，严禁模拟假数据) ---
+        // --- 第 3 页更新 (工作台真实回推的待办清单与核心决议，严禁模拟假数据) ---
         card_link_summary_t sum;
         bool has = card_link_get_summary(&sum);
 
         if (s_p3_badge) {
-            if (has) {
-                lv_label_set_text_fmt(s_p3_badge, "[待办] 已同步 %u 项", (unsigned)sum.todo_count);
+            if (has && (sum.todo_count > 0 || sum.decision_count > 0)) {
+                lv_label_set_text_fmt(s_p3_badge, "待办 %u 项 决议 %u 项",
+                                      (unsigned)sum.todo_count,
+                                      (unsigned)sum.decision_count);
                 lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x059669), 0);
+            } else if (has) {
+                lv_label_set_text(s_p3_badge, "[纪要] 本次无待办与决议");
+                lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x7C3AED), 0);
             } else {
-                lv_label_set_text(s_p3_badge, "[待办] 等待本次会议纪要");
+                lv_label_set_text(s_p3_badge, "[纪要] 等待本次会议纪要");
                 lv_obj_set_style_text_color(s_p3_badge, lv_color_hex(0x7C3AED), 0);
             }
         }
         if (s_p3_title) {
-            lv_label_set_text(s_p3_title, "飞书多维表格待办");
+            lv_label_set_text(s_p3_title, "会议待办与核心决议");
         }
         if (s_p3_content) {
-            if (has && sum.todo_count > 0) {
-                char l1[CARD_LINK_ITEM_LEN + 8] = {0};
-                char l2[CARD_LINK_ITEM_LEN + 8] = {0};
-                char l3[CARD_LINK_ITEM_LEN + 8] = {0};
-                fit_text(sum.todos[0], l1, sizeof(l1), 196);
-                if (sum.todo_count > 1) fit_text(sum.todos[1], l2, sizeof(l2), 196);
-                if (sum.todo_count > 2) fit_text(sum.todos[2], l3, sizeof(l3), 196);
-                if (l3[0])      lv_label_set_text_fmt(s_p3_content, "%s\n%s\n%s", l1, l2, l3);
-                else if (l2[0]) lv_label_set_text_fmt(s_p3_content, "%s\n%s", l1, l2);
-                else            lv_label_set_text(s_p3_content, l1);
+            if (has && (sum.todo_count > 0 || sum.decision_count > 0)) {
+                // 待办优先 (最多 2 行, 数字序号), 核心决议随后补足 (最多 4 行, [决] 前缀)。
+                // 没有待办时决议独占显示区, 解决"有时没有 Todo 页面空白"的问题。
+                char lines[4][CARD_LINK_ITEM_LEN + 12] = {{0}};
+                int n = 0;
+                for (uint8_t t = 0; t < sum.todo_count && n < 2; t++) {
+                    char buf[CARD_LINK_ITEM_LEN + 8] = {0};
+                    fit_text(sum.todos[t], buf, sizeof(buf), 150);
+                    snprintf(lines[n], sizeof(lines[n]), "%u. %s", (unsigned)(t + 1), buf);
+                    n++;
+                }
+                for (uint8_t d = 0; d < sum.decision_count && n < 4; d++) {
+                    char buf[CARD_LINK_ITEM_LEN + 8] = {0};
+                    fit_text(sum.decisions[d], buf, sizeof(buf), 132);
+                    snprintf(lines[n], sizeof(lines[n]), "[决] %s", buf);
+                    n++;
+                }
+                char out[4 * (CARD_LINK_ITEM_LEN + 12) + 8] = {0};
+                size_t used = 0;
+                for (int i = 0; i < n; i++) {
+                    int w = snprintf(out + used, sizeof(out) - used, "%s%s",
+                                     lines[i], (i + 1 < n) ? "\n" : "");
+                    if (w <= 0 || (size_t)w >= sizeof(out) - used) break;
+                    used += (size_t)w;
+                }
+                lv_label_set_text(s_p3_content, out);
+            } else if (has) {
+                lv_label_set_text(s_p3_content,
+                    "本次会议未提取到\n"
+                    "待办或核心决议\n"
+                    "可查看飞书云文档全文");
             } else {
                 lv_label_set_text(s_p3_content,
                     "暂无待办事项记录\n"
@@ -635,7 +661,7 @@ void demo_meeting_enter(void) {
     lv_obj_t *p3_tab = lv_label_create(s_page[2]);
     lv_obj_set_style_text_font(p3_tab, &font_chinese_14, 0);
     lv_obj_set_style_text_color(p3_tab, lv_color_hex(0x64748B), 0);
-    lv_label_set_text(p3_tab, "[3/3] 飞书多维表格与待办");
+    lv_label_set_text(p3_tab, "[3/3] 待办清单与核心决议");
     lv_obj_align(p3_tab, LV_ALIGN_TOP_MID, 0, 6);
 
     s_p3_badge = lv_label_create(s_page[2]);
@@ -647,7 +673,7 @@ void demo_meeting_enter(void) {
     s_p3_title = lv_label_create(s_page[2]);
     lv_obj_set_style_text_font(s_p3_title, &font_chinese_14, 0);
     lv_obj_set_style_text_color(s_p3_title, lv_color_hex(0x7C3AED), 0);
-    lv_label_set_text(s_p3_title, "飞书多维表格待办");
+    lv_label_set_text(s_p3_title, "会议待办与核心决议");
     lv_obj_align(s_p3_title, LV_ALIGN_TOP_MID, 0, 50);
 
     s_p3_content = lv_label_create(s_page[2]);

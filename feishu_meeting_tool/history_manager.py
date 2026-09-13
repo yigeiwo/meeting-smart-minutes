@@ -83,6 +83,7 @@ def save_meeting_record(
     source: str = "audio",
     user_id: Optional[str] = None,
     username: Optional[str] = None,
+    transcript_text: str = "",
 ) -> Dict[str, Any]:
     rec_id = summary_data.get("id") or summary_data.get("record_id") or f"rec_{uuid.uuid4().hex[:10]}"
     now_str = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -96,13 +97,14 @@ def save_meeting_record(
         "username": final_username,
         "title": summary_data.get("title", f"会议纪要_{now_str[:10]}"),
         "date": summary_data.get("date", now_str),
-        "duration": summary_data.get("duration", "约30分钟"),
-        "participants": summary_data.get("participants", "全员"),
+        "duration": summary_data.get("duration", "未识别"),
+        "participants": summary_data.get("participants", "未识别"),
         "created_at": now_str,
         "doc_url": final_doc_url,
         "scenario": scenario,
         "source": source,
         "summary_overview": summary_data.get("summary_overview", ""),
+        "transcript_text": transcript_text or "",
         "decisions": summary_data.get("decisions", []),
         "todos": summary_data.get("todos", []),
         "topics": summary_data.get("topics", []),
@@ -121,16 +123,17 @@ def save_meeting_record(
                     text("""
                         INSERT INTO meeting_records (
                             id, user_id, username, title, date, duration, created_at,
-                            doc_url, scenario, source, summary_overview,
+                            doc_url, scenario, source, summary_overview, transcript_text,
                             decisions_json, todos_json, topics_json, follow_ups_json, raw_data_json
                         ) VALUES (
                             :id, :user_id, :username, :title, :date, :duration, :created_at,
-                            :doc_url, :scenario, :source, :summary_overview,
+                            :doc_url, :scenario, :source, :summary_overview, :transcript_text,
                             :decisions_json, :todos_json, :topics_json, :follow_ups_json, :raw_data_json
                         )
                         ON CONFLICT (id) DO UPDATE SET
                             doc_url = EXCLUDED.doc_url,
                             summary_overview = EXCLUDED.summary_overview,
+                            transcript_text = EXCLUDED.transcript_text,
                             decisions_json = EXCLUDED.decisions_json,
                             todos_json = EXCLUDED.todos_json,
                             raw_data_json = EXCLUDED.raw_data_json
@@ -147,6 +150,7 @@ def save_meeting_record(
                         "scenario": record["scenario"],
                         "source": record["source"],
                         "summary_overview": record["summary_overview"],
+                        "transcript_text": record["transcript_text"],
                         "decisions_json": json.dumps(record["decisions"], ensure_ascii=False),
                         "todos_json": json.dumps(record["todos"], ensure_ascii=False),
                         "topics_json": json.dumps(record["topics"], ensure_ascii=False),

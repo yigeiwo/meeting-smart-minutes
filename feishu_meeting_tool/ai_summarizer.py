@@ -87,6 +87,9 @@ SYSTEM_TEMPLATE = """{scenario_prompt}
 }}
 ```
 注意：只返回上述 JSON，不得添加任何前置或后置解释。
+严禁编造：date 必须填写 "{current_date}"（真实处理时刻），不得虚构其它日期；
+participants 无法从录音识别时填写 "未识别"；录音中没有提到的内容一律留空数组，
+不得凭空虚构标题、决议、待办或责任人。
 """
 
 
@@ -214,7 +217,12 @@ class AISummarizer:
                 temperature=self.temperature,
             )
             raw_result = response.choices[0].message.content or ""
-            return self._parse_json_result(raw_result, transcript_text)
+            data = self._parse_json_result(raw_result, transcript_text)
+            # 日期纠偏: 模型常编造历史日期 (如 2024-10-05), 不以真实当天开头一律覆盖,
+            # 保证纪要落库/推送的日期与录音发生时刻一致。
+            if not str(data.get("date", "") or "").startswith(time.strftime("%Y-%m-%d")):
+                data["date"] = current_date
+            return data
         except Exception as e:
             logger.error(f"大模型 ({self.model}) 接口调用失败: {e}", exc_info=True)
             raise RuntimeError(f"AI 模型 ({self.model}) 调用失败: {str(e)}")
@@ -230,8 +238,8 @@ class AISummarizer:
             data = json.loads(cleaned)
             data.setdefault("title", "会议智能纪要")
             data.setdefault("date", time.strftime("%Y-%m-%d %H:%M"))
-            data.setdefault("duration", "约30分钟")
-            data.setdefault("participants", "全员")
+            data.setdefault("duration", "未识别")
+            data.setdefault("participants", "未识别")
             data.setdefault("decisions", [])
             data.setdefault("topics", [])
             data.setdefault("todos", [])

@@ -843,6 +843,13 @@ class CardBridge:
             logger.info(f"正在转写卡片真实录音文件: {target_wav.name}")
             transcript = pipeline.transcribe(str(target_wav))
 
+            # 转写为空 = 音频里没有人声: 如实失败, 绝不把空文本喂给 LLM 让它凭空编造纪要
+            if not transcript or not transcript.strip():
+                raise RuntimeError(
+                    f"语音识别结果为空 ({target_wav.name}), 音频中可能没有人声, 已中止提炼"
+                )
+            logger.info(f"✔ 转写完成: {len(transcript)} 字, 进入 AI 提炼")
+
             summarizer = AISummarizer(
                 api_key=cfg.llm_api_key,
                 base_url=cfg.llm_base_url,
@@ -850,6 +857,8 @@ class CardBridge:
                 temperature=cfg.llm_temperature,
             )
             summary_data = summarizer.summarize(transcript, scenario=cfg.default_scenario)
+            # 把真实转写原文挂进纪要数据, 供入库与前端回溯对照 ASR 质量
+            summary_data["transcript_text"] = transcript
 
             # 1. 自动生成飞书云文档 (Docx)
             feishu = FeishuClient(
@@ -866,7 +875,8 @@ class CardBridge:
                 logger.info(f"✔ 卡片录音结束，已自动生成飞书云文档: {doc_url}")
             except Exception as e:
                 logger.warning(f"自动创建飞书文档异常: {e}")
-                summary_data["doc_url"] = "https://feishu.cn"
+                # 未生成就是没有, 不放假链接 (之前兜底 "https://feishu.cn" 是伪造)
+                summary_data["doc_url"] = ""
 
             # 2. 自动向启用的多机器人渠道广播通知
             try:
@@ -876,10 +886,13 @@ class CardBridge:
             except Exception as e:
                 logger.warning(f"自动广播多机器人通知失败: {e}")
 
-            # 3. 自动归档至历史记录
+            # 3. 自动归档至历史记录 (含真实转写原文, 便于核对 ASR 质量)
             try:
                 from .history_manager import save_meeting_record
-                save_meeting_record(summary_data, doc_url=doc_url, scenario=cfg.default_scenario, source="card")
+                save_meeting_record(
+                    summary_data, doc_url=doc_url, scenario=cfg.default_scenario,
+                    source="card", transcript_text=transcript,
+                )
             except Exception as e:
                 logger.warning(f"归档历史记录失败: {e}")
 
