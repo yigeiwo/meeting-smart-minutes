@@ -157,6 +157,32 @@ class CardBridge:
         self.current_todo_index = 0
         self._timer_thread: Optional[threading.Thread] = None
 
+        # 服务端重启后从数据库恢复最近一次纪要 (否则 current_summary 为空,
+        # 胸卡切回会议模式时服务端无纪要可重发, 卡片显示不出上次纪要)
+        try:
+            from .history_manager import get_all_records
+            card_recs = [r for r in get_all_records()
+                         if r.get("source") == "card" and r.get("title")]
+            card_recs.sort(key=lambda r: str(r.get("created_at", "")), reverse=True)
+            if card_recs:
+                rec = card_recs[0]
+                self.current_summary = {
+                    "title": rec.get("title", "会议纪要"),
+                    "date": rec.get("date", ""),
+                    "doc_url": rec.get("doc_url", "") or "",
+                    "todos": rec.get("todos", []) or [],
+                    "decisions": rec.get("decisions", []) or [],
+                    "summary_overview": rec.get("summary_overview", ""),
+                }
+                logger.info(
+                    "已从数据库恢复最近卡片纪要: %s (待办 %d 项, 决议 %d 项)",
+                    self.current_summary["title"],
+                    len(self.current_summary["todos"]),
+                    len(self.current_summary["decisions"]),
+                )
+        except Exception as e:
+            logger.warning("恢复最近纪要失败 (不影响启动): %s", e)
+
         # ================= 🎵 蓝牙音频播放系统数据 =================
         self.bt_connected_device = "手机蓝牙 / 蓝牙耳机"
         self.bt_is_playing = False
