@@ -354,7 +354,8 @@ static void update_ui(void) {
             if (has && (sum.todo_count > 0 || sum.decision_count > 0)) {
                 // 待办优先 (最多 2 行, 数字序号), 核心决议随后补足 (最多 4 行, [决] 前缀)。
                 // 没有待办时决议独占显示区, 解决"有时没有 Todo 页面空白"的问题。
-                char lines[4][CARD_LINK_ITEM_LEN + 12] = {{0}};
+                // 行缓冲按最长前缀 "[决] "(UTF-8 6 字节) + 63 字节内容 + '\0' 预留, 防 -Werror=format-truncation
+                char lines[4][CARD_LINK_ITEM_LEN + 16] = {{0}};
                 int n = 0;
                 for (uint8_t t = 0; t < sum.todo_count && n < 2; t++) {
                     char buf[CARD_LINK_ITEM_LEN + 8] = {0};
@@ -368,7 +369,7 @@ static void update_ui(void) {
                     snprintf(lines[n], sizeof(lines[n]), "[决] %s", buf);
                     n++;
                 }
-                char out[4 * (CARD_LINK_ITEM_LEN + 12) + 8] = {0};
+                char out[4 * (CARD_LINK_ITEM_LEN + 16) + 8] = {0};
                 size_t used = 0;
                 for (int i = 0; i < n; i++) {
                     int w = snprintf(out + used, sizeof(out) - used, "%s%s",
