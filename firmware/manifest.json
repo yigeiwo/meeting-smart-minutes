@@ -1,13 +1,16 @@
 {
   "name": "FoloToy AI Passport Meeting Smart Minutes",
-  "version": "1.0.0",
+  "version": "1.2.6",
   "home_assistant_domain": "esphome",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-C3",
       "parts": [
-        { "path": "FoloToy-AI-Passport-full.bin", "offset": 0 }
+        {
+          "path": "FoloToy-AI-Passport-full.bin",
+          "offset": 0
+        }
       ]
     }
   ]

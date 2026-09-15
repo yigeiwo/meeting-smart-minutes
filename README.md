@@ -21,10 +21,21 @@
   - **双向事件监听**：支持飞书、钉钉、企微、Telegram、OneBot QQ、通用 Webhook 接收。
   - **群内交互指令**：`@机器人 总结 [文本]`、`@机器人 待办`、`@机器人 会议`、`@机器人 状态`、`set [bucket] [key] [val]`。
   - **多路并发广播**：9 大主流渠道并行推送。
+- 🛡️ **AI 结果真实性约束（反编造）**：
+  - 转写为空时如实失败，绝不把空文本喂给大模型凭空生成纪要；纪要日期强制使用真实处理日期。
+  - 转写原文 `transcript_text` 全文入库，可在工作台历史记录中对照音频核对 ASR 质量。
+  - 飞书云文档创建失败时如实留空，不返回伪造链接。
+  - ASR 服务商/模型可配置（`ASR_PROVIDER` / `ASR_MODEL` / `ASR_BASE_URL`，默认 Whisper，支持自建网关如 grok-stt）。
 - 🎴 **AI Passport 硬件联动**：
-  - 支持 ESP32-C3 实体胸卡（LVGL 三页看板：会议录音与纪要 / 蓝牙配网与工作台链路 / 多维表格待办）。
-  - 胸卡通过真实 BLE Web Bluetooth 配网（广播名 `FoloPassport`），并用内置 TCP/NDJSON 客户端
-    直连工作台 `5566` 端口：**上行真实录音音频流**，下行接收 AI 纪要回推。
+  - 支持 ESP32-C3 实体胸卡（LVGL 三页看板：会议录音与纪要 / 蓝牙配网与工作台链路 / 待办清单与核心决议）。
+  - 胸卡通过真实 BLE Web Bluetooth 配网（广播名 `FoloPassport`），再以 `wss://` 直连工作台
+    `/ws/card?token=<设备令牌>`（443 复用站点证书、设备令牌防伪造，3 秒退避自动重连 + 15 秒心跳）：
+    **上行真实录音音频流**，下行接收 AI 纪要回推。
+  - **纪要恢复不丢失**：切到其他模式再切回会议模式时，卡片上报 `select_mode` 触发工作台重发最近纪要；
+    服务端重启后也会从数据库自动恢复最近一次纪要，卡片侧另有本地缓存兜底。
+  - **跨模式提醒横幅**：AI 提炼完成后，无论卡片当前处于哪个模式，屏幕顶部都会弹出提醒横幅，
+    无需守在会议模式等待。
+  - 第 3 页合并展示 **待办清单 + 核心决议**（`[决]` 前缀），没有待办时决议独占整页不空白。
   - 完整闭环：卡片录音 → 工作台落盘 `records/card_*.wav` → 真实 AI 提炼 + 飞书云文档 →
     结果回推卡片屏幕真实展示（失败原因同样如实回传，不伪造成功）。
 - 🛡️ **企业级 PostgreSQL 数据库架构**：
@@ -90,6 +101,28 @@ ssh root@43.155.248.215
 cd /root/ai-passport-suite
 docker compose up -d --build
 ```
+
+---
+
+## 🧱 固件版本与刷机
+
+| 项目 | 值 |
+| :--- | :--- |
+| 固件源码 | `ai-passport/`（ESP-IDF v5.5.3 / ESP32-C3） |
+| 云端编译 | 推送 `main` 自动触发 GitHub Actions 构建；打 `v*` 标签自动发布带固件的 Release |
+| 当前版本 | **v1.2.6**（[Releases](https://github.com/yigeiwo/meeting-smart-minutes/releases)，资产 `FoloToy-AI-Passport-full.bin`） |
+| 仓库快照 | `firmware/` 目录与 Release 同步（`manifest.json` 版本号一致），供工作台 `/api/firmware/download` 下发 |
+
+**升级刷机（保留 Wi-Fi 配网）**：整包 `full.bin` 直接刷 `0x0` 会连带擦掉 `0x9000` 起的
+NVS 分区，胸卡将丢失 Wi-Fi 凭证与设备令牌、必须重新 BLE 配网。**日常升级只刷应用分区**：
+
+```bash
+esptool --chip esp32c3 --port COM3 write_flash 0x10000 firmware/FoloToy-AI-Passport-app.bin
+```
+
+首次全新烧录（或愿意重新配网）才使用整包 `full.bin` 刷 `0x0`。
+近期版本要点：v1.2.4 纪要恢复 + 跨模式提醒横幅；v1.2.5 进入模式上报 `select_mode`；
+v1.2.6 第 3 页「待办 + 核心决议」合并展示。
 
 **还需要你在 `.env` 里补真实凭据**
 
